@@ -126,6 +126,20 @@ describe('auth & employees', () => {
     expect((await me(await loginAs('newpass9'))).statusCode).toBe(200);
   });
 
+  it('lists the administrator account only to the administrator', async () => {
+    await make(t, '/api/employees', { name: 'Мира', login: 'mira', password: 'pass123', isMaster: true });
+    const names = (res: { json: () => { items: { name: string }[] } }) => res.json().items.map((e) => e.name);
+    expect(names(await t.api('GET', '/api/employees'))).toEqual([ADMIN.name, 'Мира']);
+
+    const token = (await t.app.inject({ method: 'POST', url: '/api/auth/login', payload: { login: 'mira', password: 'pass123' } })).json()
+      .token as string;
+    const asMira = (url: string) => t.app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } });
+    expect(names(await asMira('/api/employees'))).toEqual(['Мира']);
+    expect(names(await asMira('/api/employees?includeInactive=true'))).toEqual(['Мира']);
+    expect(names(await asMira('/api/smm/studio/people'))).toEqual(['Мира']);
+    expect(names(await t.api('GET', '/api/smm/studio/people'))).toEqual([ADMIN.name, 'Мира']);
+  });
+
   it('rate-limits login to 10 attempts per minute per IP', async () => {
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) {

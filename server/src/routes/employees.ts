@@ -6,6 +6,7 @@ import type { AppContext } from '../context.js';
 import type { DbOrTx } from '../db/client.js';
 import { employees } from '../db/schema.js';
 import { BCRYPT_ROUNDS, EMPLOYEE_PALETTE } from '../db/seed.js';
+import { visibleTo } from '../domain/employee-visibility.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { employeeOut } from '../lib/serialize.js';
 import { hexColor, idParams, nonNull, parse, phoneInput, queryBool, requiredText } from '../lib/validation.js';
@@ -57,7 +58,7 @@ export function employeeRoutes(app: FastifyInstance, ctx: AppContext): void {
       .where(q.includeInactive ? undefined : eq(employees.active, true))
       .orderBy(asc(employees.name), asc(employees.id))
       .all();
-    return { items: rows.map(employeeOut) };
+    return { items: rows.filter(visibleTo(ctx.config, request.employee)).map(employeeOut) };
   });
 
   app.post('/employees', async (request) => {
