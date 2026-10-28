@@ -34,6 +34,38 @@ export interface SentMessage {
   messageId: number;
 }
 
+/** A chat for the SMM methods: a private chat id, a channel's `@username` or its numeric `-100…` id. */
+export type ChatRef = number | string;
+
+/** One file of a channel post or a hand-off: a photo, a video, or any file sent as is (no compression). */
+export interface MediaFile {
+  kind: 'photo' | 'video' | 'document';
+  source: PhotoSource;
+}
+
+export interface HtmlOptions {
+  /** Inline buttons under the message (under the last chunk of a long text). */
+  keyboard?: InlineKeyboard;
+  /** false: the text goes as is, without parse_mode. Default true — Telegram HTML. */
+  html?: boolean;
+}
+
+export interface ChatInfo {
+  id: number;
+  /** private | group | supergroup | channel */
+  type: string;
+  title: string | null;
+  username: string | null;
+}
+
+/** The bot's own membership in a chat. */
+export interface BotMembership {
+  /** creator | administrator | member | restricted | left | kicked */
+  status: string;
+  /** Administrators of a channel: the right to post (null when Telegram does not say). */
+  canPostMessages: boolean | null;
+}
+
 export interface BotGateway {
   /** True while long polling is active and messages can be delivered. */
   isRunning(): boolean;
@@ -49,6 +81,25 @@ export interface BotGateway {
   editKeyboard(chatId: number, messageId: number, keyboard: InlineKeyboard | null): Promise<void>;
   deleteMessage(chatId: number, messageId: number): Promise<void>;
   sendTyping(chatId: number): Promise<void>;
+
+  // SMM (server/src/smm/telegram.ts): channel posts, previews for approval, hand-offs.
+
+  /**
+   * Sends text that is already Telegram HTML (no Markdown conversion); a long text goes in chunks. When Telegram
+   * rejects the markup, the chunk is sent again with the tags stripped.
+   */
+  sendHtml(chat: ChatRef, text: string, options?: HtmlOptions): Promise<SentMessage>;
+  /**
+   * One file with a caption, or an album of 2–10 (the caption on the first item); `messageId` is the first
+   * message's. The caption follows `options.html` and falls back to plain text like `sendHtml`.
+   */
+  sendMedia(chat: ChatRef, files: MediaFile[], caption: string, options?: HtmlOptions): Promise<SentMessage>;
+  /** null when Telegram does not know the chat or the bot has no access to it. */
+  getChat(chat: ChatRef): Promise<ChatInfo | null>;
+  /** The bot's own status in the chat; null when the bot has no access to it. */
+  getBotMembership(chat: ChatRef): Promise<BotMembership | null>;
+  /** Subscribers of a channel (members of a group); null when unavailable. */
+  getChatMemberCount(chat: ChatRef): Promise<number | null>;
 }
 
 export class BotUnavailableError extends Error {
@@ -111,5 +162,25 @@ export class OfflineGateway implements BotGateway {
 
   async sendTyping(): Promise<void> {
     /* nothing to do */
+  }
+
+  async sendHtml(): Promise<SentMessage> {
+    throw new BotUnavailableError();
+  }
+
+  async sendMedia(): Promise<SentMessage> {
+    throw new BotUnavailableError();
+  }
+
+  async getChat(): Promise<ChatInfo | null> {
+    throw new BotUnavailableError();
+  }
+
+  async getBotMembership(): Promise<BotMembership | null> {
+    throw new BotUnavailableError();
+  }
+
+  async getChatMemberCount(): Promise<number | null> {
+    throw new BotUnavailableError();
   }
 }

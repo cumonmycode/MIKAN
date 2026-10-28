@@ -21,6 +21,17 @@ const intWithDefault = (defaultValue: number, min: number, max: number) =>
     z.number().int().min(min).max(max),
   );
 
+/** Polza models of the SMM marketer unless SMM_*_MODEL say otherwise (the same as in Titan HUB). */
+export const SMM_MODEL_DEFAULTS = {
+  text: 'google/gemini-3.8-flash',
+  image: 'google/gemini-nano-banana-2.1',
+  video: 'google/veo3_fast',
+} as const;
+
+/** A Polza model id: empty or missing → the default. */
+const modelWithDefault = (defaultValue: string) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined), z.string().default(defaultValue));
+
 const envSchema = z.object({
   PORT: intWithDefault(3000, 1, 65535),
   HOST: z.string().default('0.0.0.0'),
@@ -64,6 +75,20 @@ const envSchema = z.object({
     (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
     z.string().regex(/^\d{20}\/\d{9}$/, 'ожидается «счёт/БИК», например 40702810123456789012/044525104').optional(),
   ),
+  SMM_TEXT_MODEL: modelWithDefault(SMM_MODEL_DEFAULTS.text),
+  SMM_IMAGE_MODEL: modelWithDefault(SMM_MODEL_DEFAULTS.image),
+  SMM_VIDEO_MODEL: modelWithDefault(SMM_MODEL_DEFAULTS.video),
+  SMM_IMAGE_RESOLUTION: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim().toUpperCase() : undefined),
+    z.enum(['1K', '2K', '4K']).default('1K'),
+  ),
+  SMM_RELAY_KEY: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+    z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{16,128}$/, 'ожидается секрет из 16–128 латинских букв, цифр, «_» или «-»')
+      .optional(),
+  ),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
@@ -95,6 +120,15 @@ export interface Config {
     merchantId: string | null;
     /** `<20-digit account>/<BIC>` the money is credited to. */
     accountId: string | null;
+  };
+  /** SMM marketer (docs/SMM.md): Polza models and the Cloudflare Worker route for the outside internet. */
+  smm: {
+    textModel: string;
+    imageModel: string;
+    videoModel: string;
+    imageResolution: '1K' | '2K' | '4K';
+    /** Secret of the Worker's `/web/<key>/…` route (its `WEB_RELAY_KEY`); null — t.me and Instagram go direct. */
+    relayKey: string | null;
   };
   logLevel: string;
 }
@@ -150,6 +184,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       chatHourlyLimit: e.AI_CHAT_HOURLY_LIMIT,
     },
     tochka: tochkaOf(e),
+    smm: {
+      textModel: e.SMM_TEXT_MODEL,
+      imageModel: e.SMM_IMAGE_MODEL,
+      videoModel: e.SMM_VIDEO_MODEL,
+      imageResolution: e.SMM_IMAGE_RESOLUTION,
+      relayKey: e.SMM_RELAY_KEY ?? null,
+    },
     logLevel: e.LOG_LEVEL,
   };
 }

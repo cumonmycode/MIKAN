@@ -1,5 +1,5 @@
-import { Bot, GrammyError, InputFile } from 'grammy';
-import type { InlineKeyboardMarkup, Message, ReplyKeyboardMarkup } from 'grammy/types';
+import { Bot, GrammyError, InputFile, InputMediaBuilder } from 'grammy';
+import type { InlineKeyboardMarkup, InputMediaDocument, InputMediaPhoto, InputMediaVideo, Message, ReplyKeyboardMarkup } from 'grammy/types';
 import type { AppContext } from '../context.js';
 import { getBotSettings, getCachedBotUsername, setCachedBotUsername } from '../domain/settings.js';
 import { errorMessage } from '../lib/errors.js';
@@ -9,7 +9,12 @@ import {
   BotSendError,
   BotUnavailableError,
   type BotGateway,
+  type BotMembership,
+  type ChatInfo,
+  type ChatRef,
+  type HtmlOptions,
   type InlineKeyboard,
+  type MediaFile,
   type PhotoSource,
   type SendOptions,
   type SentMessage,
@@ -57,6 +62,35 @@ async function withMarkup<T>(text: string, send: (formatted: { text: string; par
     return send({ text: toPlainText(text) });
   }
 }
+
+/** Telegram HTML without its tags and entities: what is sent when Telegram rejects the markup. */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+/** Sends `text` that already is Telegram HTML (or plain, `html` false); rejected HTML goes again with tags stripped. */
+async function withHtml<T>(text: string, html: boolean, send: (formatted: { text: string; parse_mode?: 'HTML' }) => Promise<T>): Promise<T> {
+  if (!html || !text) return send({ text });
+  try {
+    return await send({ text, parse_mode: 'HTML' });
+  } catch (err) {
+    if (!badMarkup(err)) throw err;
+    return send({ text: stripHtml(text) });
+  }
+}
+
+/** Telegram does not know the chat, or the bot has no access to it (not a member, kicked, members hidden). */
+const noAccess = (err: unknown): boolean => err instanceof GrammyError && (err.error_code === 400 || err.error_code === 403);
+
+/** Albums are limited by Telegram to 10 items. */
+const MAX_ALBUM = 10;
 
 function toSendError(err: unknown): BotSendError {
   if (err instanceof GrammyError) {
@@ -340,6 +374,131 @@ export class BotController implements BotGateway {
   async sendTyping(chatId: number): Promise<void> {
     if (!this.bot || !this.polling) return;
     await this.bot.api.sendChatAction(chatId, 'typing');
+  }
+
+  async sendHtml(chat: ChatRef, text: string, options: HtmlOptions = {}): Promise<SentMessage> {
+    const bot = this.requireBot();
+    const chunks = splitMessage(text);
+    if (!chunks.length) throw new BotSendError('Telegram: пустое сообщение', false);
+    let messageId = 0;
+    for (const [index, chunk] of chunks.entries()) {
+      const last = index === chunks.length - 1;
+      try {
+        const sent = await withHtml(chunk, options.html !== false, (formatted) =>
+          bot.api.sendMessage(chat, formatted.text, {
+            ...(formatted.parse_mode ? { parse_mode: formatted.parse_mode } : {}),
+            link_preview_options: { is_disabled: true },
+            ...(last && options.keyboard ? { reply_markup: markup(options.keyboard) } : {}),
+          }),
+        );
+        messageId = sent.message_id;
+      } catch (err) {
+        throw toSendError(err);
+      }
+    }
+    return { messageId };
+  }
+
+  /** A photo may come from the file_id cache; videos and documents are uploaded every time. */
+  private fileInput(file: MediaFile): { key: string | null; input: InputFile | string } {
+    if (file.kind === 'photo') return this.photoInput(file.source);
+    return { key: null, input: file.source.kind === 'file' ? new InputFile(file.source.path) : file.source.url };
+  }
+
+  async sendMedia(chat: ChatRef, files: MediaFile[], caption: string, options: HtmlOptions = {}): Promise<SentMessage> {
+    const bot = this.requireBot();
+    const items = files.slice(0, MAX_ALBUM);
+    if (!items.length) throw new BotSendError('Telegram: нет файлов для отправки', false);
+    const text = caption.trim() ? truncate(caption.trim(), TELEGRAM_MAX_CAPTION) : '';
+    try {
+      if (items.length === 1) return await this.sendOne(bot, chat, items[0]!, text, options);
+      return await this.sendAlbum(bot, chat, items, text, options.html !== false);
+    } catch (err) {
+      throw err instanceof BotSendError ? err : toSendError(err);
+    }
+  }
+
+  private async sendOne(bot: Bot, chat: ChatRef, file: MediaFile, text: string, options: HtmlOptions): Promise<SentMessage> {
+    const sent = await withHtml<Message>(text, options.html !== false, async (formatted) => {
+      const { key, input } = this.fileInput(file);
+      const other = {
+        ...(formatted.text ? { caption: formatted.text } : {}),
+        ...(formatted.text && formatted.parse_mode ? { parse_mode: formatted.parse_mode } : {}),
+        ...(options.keyboard ? { reply_markup: markup(options.keyboard) } : {}),
+      };
+      if (file.kind === 'photo') {
+        return bot.api.sendPhoto(chat, input, other).then((message) => {
+          if (key) this.rememberFileId(key, message);
+          return message;
+        });
+      }
+      if (file.kind === 'video') return bot.api.sendVideo(chat, input, { ...other, supports_streaming: true });
+      return bot.api.sendDocument(chat, input, other);
+    });
+    return { messageId: sent.message_id };
+  }
+
+  /** Telegram albums are either all documents or photos and videos; buttons are not allowed under an album. */
+  private async sendAlbum(bot: Bot, chat: ChatRef, items: MediaFile[], text: string, html: boolean): Promise<SentMessage> {
+    const documents = items.every((f) => f.kind === 'document');
+    if (!documents && items.some((f) => f.kind === 'document')) {
+      throw new BotSendError('Telegram: в одном альбоме нельзя смешать файлы с фото и видео', false);
+    }
+    const sent = await withHtml<Message[]>(text, html, async (formatted) => {
+      const captionOf = (index: number) =>
+        index === 0 && formatted.text ? { caption: formatted.text, ...(formatted.parse_mode ? { parse_mode: formatted.parse_mode } : {}) } : {};
+      const inputs = items.map((f) => this.fileInput(f));
+      if (documents) {
+        const media: InputMediaDocument[] = inputs.map(({ input }, i) => InputMediaBuilder.document(input, captionOf(i)));
+        return bot.api.sendMediaGroup(chat, media);
+      }
+      const media: Array<InputMediaPhoto | InputMediaVideo> = inputs.map(({ input }, i) =>
+        items[i]!.kind === 'video'
+          ? InputMediaBuilder.video(input, { ...captionOf(i), supports_streaming: true })
+          : InputMediaBuilder.photo(input, captionOf(i)),
+      );
+      return bot.api.sendMediaGroup(chat, media).then((messages) => {
+        messages.forEach((message, i) => {
+          const key = inputs[i]?.key;
+          if (key && items[i]?.kind === 'photo') this.rememberFileId(key, message);
+        });
+        return messages;
+      });
+    });
+    return { messageId: sent[0]?.message_id ?? 0 };
+  }
+
+  async getChat(chat: ChatRef): Promise<ChatInfo | null> {
+    const bot = this.requireBot();
+    try {
+      const info = await bot.api.getChat(chat);
+      const named = info as { title?: string; username?: string };
+      return { id: info.id, type: info.type, title: named.title ?? null, username: named.username ?? null };
+    } catch (err) {
+      if (noAccess(err)) return null;
+      throw toSendError(err);
+    }
+  }
+
+  async getBotMembership(chat: ChatRef): Promise<BotMembership | null> {
+    const bot = this.requireBot();
+    try {
+      const member = await bot.api.getChatMember(chat, bot.botInfo.id);
+      return { status: member.status, canPostMessages: member.status === 'administrator' ? (member.can_post_messages ?? null) : null };
+    } catch (err) {
+      if (noAccess(err)) return null;
+      throw toSendError(err);
+    }
+  }
+
+  async getChatMemberCount(chat: ChatRef): Promise<number | null> {
+    const bot = this.requireBot();
+    try {
+      return await bot.api.getChatMemberCount(chat);
+    } catch (err) {
+      if (noAccess(err)) return null;
+      throw toSendError(err);
+    }
   }
 
   /** Downloads through TELEGRAM_API_ROOT (Cloudflare Worker in prod). The URL contains the token — never log it. */

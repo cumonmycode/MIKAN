@@ -28,6 +28,9 @@ import { qrPaymentRoutes } from './routes/qr-payments.js';
 import { receiptRoutes } from './routes/receipts.js';
 import { salesRoutes } from './routes/sales.js';
 import { settingsRoutes } from './routes/settings.js';
+import { smmRoutes } from './routes/smm.js';
+import { smmKnowledgeRoutes } from './routes/smm-knowledge.js';
+import { smmSettingsRoutes } from './routes/smm-settings.js';
 import { uploadRoutes } from './routes/uploads.js';
 
 export const APP_VERSION = '1.0.0';
@@ -171,6 +174,9 @@ export async function buildApp(ctx: AppContext, options: BuildOptions = {}): Pro
         cashRoutes(secured, ctx);
         botRoutes(secured, ctx);
         settingsRoutes(secured, ctx);
+        smmRoutes(secured, ctx);
+        smmSettingsRoutes(secured, ctx);
+        smmKnowledgeRoutes(secured, ctx);
       });
     },
     { prefix: '/api' },

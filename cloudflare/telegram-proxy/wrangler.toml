@@ -5,3 +5,10 @@ compatibility_date = "2025-09-01"
 [vars]
 # Numeric bot IDs (the part of the token before ":") the proxy may forward, comma-separated.
 ALLOWED_BOT_IDS = "8960400388"
+# The MIKAN server whose SMM files Meta fetches through /media/smm-<file> (→ https://<ORIGIN_HOST>/uploads/smm-<file>).
+# Keep in sync with DOMAIN in deploy/.env (see deploy/README.md → «Смена домена»).
+ORIGIN_HOST = "95-170-124-192.sslip.io"
+
+# Secret of the /web/<key>/… route (t.me and Instagram for the SMM marketer) — not stored here:
+#   npx wrangler secret put WEB_RELAY_KEY
+# The same value goes to SMM_RELAY_KEY in the server's .env (at least 16 characters, e.g. `openssl rand -hex 24`).

@@ -87,7 +87,7 @@ describe('reports & dashboard', () => {
     const dash = (await t.api('GET', '/api/dashboard')).json();
     expect(dash).toMatchObject({ date: '2026-10-15', revenueToday: 3000, salesCountToday: 1, openShift: null });
     expect(dash.appointments).toEqual([]);
-    expect(dash.badges).toEqual({ unreadChats: 0, needsAttention: 0, newBookingRequests: 0, lowStock: 0 });
+    expect(dash.badges).toEqual({ unreadChats: 0, needsAttention: 0, newBookingRequests: 0, lowStock: 0, smmReview: 0 });
   });
 
   it('lists today’s non-cancelled appointments on the dashboard and counts low stock', async () => {

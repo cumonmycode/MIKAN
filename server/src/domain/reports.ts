@@ -1,8 +1,20 @@
 import { and, count, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import type { DbOrTx } from '../db/client.js';
-import { appointments, botChats, bookingRequests, clients, depositOperations, products, saleItems, sales } from '../db/schema.js';
+import {
+  appointments,
+  botChats,
+  bookingRequests,
+  clients,
+  depositOperations,
+  products,
+  saleItems,
+  sales,
+  smmPosts,
+} from '../db/schema.js';
 import type { SaleItemRow, SaleRow } from '../lib/serialize.js';
 import { localDate, localDatesInRange, toIso } from '../lib/time.js';
+import { getSmmSettings } from '../smm/settings.js';
+import { PROFILES } from '../smm/types.js';
 import { hasLowStock } from './products.js';
 import { employeeRefOrMissing, employeesByIds, productsByIds, variantsByIds } from './refs.js';
 import { studioTimezone } from './settings.js';
@@ -236,5 +248,18 @@ export function badges(db: DbOrTx) {
     needsAttention: n(db.select({ n: count() }).from(botChats).where(eq(botChats.needsAttention, true)).get()),
     newBookingRequests: n(db.select({ n: count() }).from(bookingRequests).where(eq(bookingRequests.status, 'new')).get()),
     lowStock: n(db.select({ n: count() }).from(products).where(and(eq(products.active, true), hasLowStock)).get()),
+    smmReview: smmReviewCount(db),
   };
+}
+
+/** SMM posts waiting for approval in the profiles that are on (a switched-off profile does not nag). */
+function smmReviewCount(db: DbOrTx): number {
+  const enabled = PROFILES.filter((profile) => getSmmSettings(db, profile).enabled);
+  if (!enabled.length) return 0;
+  const row = db
+    .select({ n: count() })
+    .from(smmPosts)
+    .where(and(eq(smmPosts.status, 'review'), inArray(smmPosts.profile, enabled)))
+    .get();
+  return row?.n ?? 0;
 }

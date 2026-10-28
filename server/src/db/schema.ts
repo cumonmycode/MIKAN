@@ -644,3 +644,5 @@ export const idempotencyKeys = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.employeeId, t.key] }), index('idempotency_keys_created_idx').on(t.createdAt)],
 );
+
+export * from './schema-smm.js';

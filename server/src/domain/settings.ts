@@ -94,7 +94,8 @@ const KEY_STAFF_CODE = 'staffCode';
 const KEY_BOT_USERNAME = 'botUsername';
 const KEY_DIGESTS_SENT = 'digestsSent';
 
-function readKey<T>(db: DbOrTx, key: string): T | null {
+/** JSON value of a settings key, null when missing or unreadable (also used by the SMM module for its own keys). */
+export function readKey<T>(db: DbOrTx, key: string): T | null {
   const row = db.select().from(settings).where(eq(settings.key, key)).get();
   if (!row) return null;
   try {
@@ -104,7 +105,7 @@ function readKey<T>(db: DbOrTx, key: string): T | null {
   }
 }
 
-function writeKey(db: DbOrTx, key: string, value: unknown): void {
+export function writeKey(db: DbOrTx, key: string, value: unknown): void {
   const json = JSON.stringify(value);
   const now = Date.now();
   db.insert(settings)
@@ -113,7 +114,7 @@ function writeKey(db: DbOrTx, key: string, value: unknown): void {
     .run();
 }
 
-function deleteKey(db: DbOrTx, key: string): void {
+export function deleteKey(db: DbOrTx, key: string): void {
   db.delete(settings).where(eq(settings.key, key)).run();
 }
 

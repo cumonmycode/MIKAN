@@ -33,6 +33,8 @@ export interface AppContext {
   ai: AiClient | null;
   /** Overrides the real image generator (tests); defaults to `generateImage` from lib/service-images. */
   generateImage?: ImageGenerator;
+  /** Overrides `fetch` for the SMM marketer's outside calls — Polza, the relay, downloads (tests). */
+  smmFetch?: typeof fetch;
   /** SBP QR payments (Tochka); null when the bank credentials are not configured. */
   qr: QrProvider | null;
   /** Invoked after bot settings change (start/stop polling). */

@@ -15,6 +15,7 @@ import { QR_SWEEP_INTERVAL_MS, sweepQrPayments } from './domain/qr-payments.js';
 import { studioTimezone } from './domain/settings.js';
 import { errorMessage } from './lib/errors.js';
 import { createQrProvider } from './payments/tochka.js';
+import { SMM_TICK_INTERVAL_MS, smmIdle, smmTick } from './smm/workflow.js';
 
 const BACKUP_CHECK_MS = 10 * 60_000;
 
@@ -92,6 +93,19 @@ async function main(): Promise<void> {
       });
   }, DIGEST_CHECK_INTERVAL_MS);
 
+  // SMM marketer: publishes on time, hands posts over, reminds, prepares the next posts, collects numbers.
+  // Steps that need the AI key are skipped inside the tick when it is missing; publishing still runs.
+  let smmRunning = false;
+  const smmTimer = setInterval(() => {
+    if (smmRunning) return;
+    smmRunning = true;
+    smmTick(ctx)
+      .catch((err) => log.error({ err: errorMessage(err) }, 'SMM tick failed'))
+      .finally(() => {
+        smmRunning = false;
+      });
+  }, SMM_TICK_INTERVAL_MS);
+
   const backupDir = path.join(config.dataDir, 'backups');
   const backupTick = () =>
     runBackupIfDue(sqlite, backupDir, studioTimezone(db))
@@ -108,10 +122,14 @@ async function main(): Promise<void> {
     clearInterval(senderTimer);
     clearInterval(qrTimer);
     clearInterval(digestTimer);
+    clearInterval(smmTimer);
     clearInterval(backupTimer);
     const force = setTimeout(() => process.exit(1), 15_000);
     force.unref();
     try {
+      // An SMM tick may be publishing right now: let it finish before the bot and the database go away
+      // (the force exit above still caps the wait; a post cut off mid-way is recovered by the next start).
+      await smmIdle(ctx);
       await controller.stop();
       await app.close();
       sqlite.close();

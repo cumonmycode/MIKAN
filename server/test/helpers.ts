@@ -7,7 +7,12 @@ import { buildApp } from '../src/app.js';
 import {
   BotSendError,
   type BotGateway,
+  type BotMembership,
+  type ChatInfo,
+  type ChatRef,
+  type HtmlOptions,
   type InlineKeyboard,
+  type MediaFile,
   type PhotoSource,
   type ReplyKeyboard,
   type SendOptions,
@@ -83,6 +88,55 @@ export class FakeGateway implements BotGateway {
   }
   textsTo(chatId: number): string[] {
     return this.sent.filter((s) => s.chatId === chatId).map((s) => s.text);
+  }
+
+  // SMM: HTML texts and files (channel posts, previews for approval, hand-offs) and the channels the bot sees.
+
+  htmlSent: Array<{ chat: ChatRef; text: string; html: boolean; keyboard?: InlineKeyboard; messageId: number }> = [];
+  mediaSent: Array<{ chat: ChatRef; files: MediaFile[]; caption: string; html: boolean; messageId: number }> = [];
+  /** Errors to throw on the next sendHtml / sendMedia calls (consumed in order). */
+  smmFailures: Error[] = [];
+  /** Channels the bot can see: getChat, the bot's membership and the subscriber count. */
+  channels: Array<{ info: ChatInfo; membership: BotMembership | null; members: number | null }> = [];
+
+  async sendHtml(chat: ChatRef, text: string, options: HtmlOptions = {}): Promise<SentMessage> {
+    const failure = this.smmFailures.shift();
+    if (failure) throw failure;
+    const messageId = ++this.nextMessageId;
+    this.htmlSent.push({ chat, text, html: options.html !== false, messageId, ...(options.keyboard ? { keyboard: options.keyboard } : {}) });
+    return { messageId };
+  }
+  async sendMedia(chat: ChatRef, files: MediaFile[], caption: string, options: HtmlOptions = {}): Promise<SentMessage> {
+    const failure = this.smmFailures.shift();
+    if (failure) throw failure;
+    const messageId = ++this.nextMessageId;
+    this.mediaSent.push({ chat, files, caption, html: options.html !== false, messageId });
+    // An album takes one message id per file; the first one is returned.
+    this.nextMessageId += Math.max(0, files.length - 1);
+    return { messageId };
+  }
+  private channel(chat: ChatRef) {
+    const ref = String(chat);
+    return this.channels.find((c) => String(c.info.id) === ref || (c.info.username !== null && `@${c.info.username}` === ref)) ?? null;
+  }
+  async getChat(chat: ChatRef): Promise<ChatInfo | null> {
+    return this.channel(chat)?.info ?? null;
+  }
+  async getBotMembership(chat: ChatRef): Promise<BotMembership | null> {
+    return this.channel(chat)?.membership ?? null;
+  }
+  async getChatMemberCount(chat: ChatRef): Promise<number | null> {
+    return this.channel(chat)?.members ?? null;
+  }
+  /** Everything SMM sent to a chat, in order: texts and file captions. */
+  smmTo(chat: ChatRef): string[] {
+    const ref = String(chat);
+    return [
+      ...this.htmlSent.filter((s) => String(s.chat) === ref).map((s) => ({ id: s.messageId, text: s.text })),
+      ...this.mediaSent.filter((s) => String(s.chat) === ref).map((s) => ({ id: s.messageId, text: s.caption })),
+    ]
+      .sort((a, b) => a.id - b.id)
+      .map((s) => s.text);
   }
 }
 

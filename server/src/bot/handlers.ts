@@ -1,6 +1,7 @@
 import type { Bot, Context, Keyboard } from 'grammy';
 import type { AppContext } from '../context.js';
 import { errorMessage } from '../lib/errors.js';
+import { onSmmPrivate, onSmmVoice } from '../smm/tg-handlers.js';
 import { handleCallback } from './callbacks.js';
 import { jewelryCategoriesMenu, sendMenu, serviceSectionsMenu } from './catalog.js';
 import { BUTTONS, mainKeyboard, staffKeyboard } from './keyboards.js';
@@ -136,9 +137,11 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   });
 
   pm.on('message:photo', async (c) => {
+    const caption = c.message.caption?.trim();
+    // Staff: the caption may be the awaited SMM remark or the link to a published post.
+    if (caption && (await onSmmPrivate(ctx, c.chat.id, caption))) return;
     const sizes = [...c.message.photo].reverse();
     const best = sizes.find((s) => (s.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES);
-    const caption = c.message.caption?.trim();
     // Not awaited: grammY handles updates one by one, so a slow download must not stall other chats.
     // The pipeline awaits the promise when it builds the AI request.
     const image = best ? fetchImage(deps, best.file_id, 'image/jpeg') : undefined;
@@ -158,6 +161,8 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   });
 
   pm.on(['message:voice', 'message:audio'], async (c) => {
+    // Staff answering an SMM «Поправить» by voice are asked to write the remark (no speech recognition here).
+    if (await onSmmVoice(ctx, c.chat.id)) return;
     await pipeline.receiveUnsupported(sender(c), '[Голосовое сообщение]');
   });
 
@@ -170,6 +175,8 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   });
 
   pm.on('message:text', async (c) => {
+    // Staff: an awaited SMM remark or the link to a published post is handled there, not by the staff assistant.
+    if (await onSmmPrivate(ctx, c.chat.id, c.message.text)) return;
     pipeline.receive(sender(c), c.message.text);
   });
 }

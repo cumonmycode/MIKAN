@@ -92,6 +92,13 @@
       "when": 1792350851599,
       "tag": "0013_product_archived",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1793198407591,
+      "tag": "0014_smm",
+      "breakpoints": true
     }
   ]
 }
