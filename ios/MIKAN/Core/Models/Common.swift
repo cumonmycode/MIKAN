@@ -11,8 +11,28 @@ nonisolated struct Badges: Codable, Hashable, Sendable {
     let needsAttention: Int
     let newBookingRequests: Int
     let lowStock: Int
+    /// SMM posts waiting for approval in the enabled profiles.
+    var smmReview = 0
 
     static let zero = Badges(unreadChats: 0, needsAttention: 0, newBookingRequests: 0, lowStock: 0)
+}
+
+nonisolated extension Badges {
+    private enum CodingKeys: String, CodingKey {
+        case unreadChats, needsAttention, newBookingRequests, lowStock, smmReview
+    }
+
+    /// Servers without the SMM module send no `smmReview`.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            unreadChats: try c.decode(Int.self, forKey: .unreadChats),
+            needsAttention: try c.decode(Int.self, forKey: .needsAttention),
+            newBookingRequests: try c.decode(Int.self, forKey: .newBookingRequests),
+            lowStock: try c.decode(Int.self, forKey: .lowStock),
+            smmReview: try c.decode(.smmReview, or: 0)
+        )
+    }
 }
 
 nonisolated struct Dashboard: Codable, Sendable {

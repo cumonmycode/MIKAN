@@ -62,7 +62,7 @@ final class AppState {
     }
 
     /// «Ещё» tab badge.
-    var moreBadge: Int { badges.unreadChats + badges.newBookingRequests }
+    var moreBadge: Int { badges.unreadChats + badges.newBookingRequests + badges.smmReview }
 
     func signIn(login: String, password: String, server: String) async throws {
         guard let url = ServerConfig.normalize(server) else { throw APIError.invalidServerAddress }

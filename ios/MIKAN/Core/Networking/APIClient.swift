@@ -25,7 +25,9 @@ final class APIClient {
     @ObservationIgnored private let logger = Logger(subsystem: "com.mikanstudio.crm", category: "api")
 
     static let requestTimeout: TimeInterval = 20
-    private static let uploadTimeout: TimeInterval = 60
+    static let uploadTimeout: TimeInterval = 60
+    /// Videos up to 100 MB over a mobile uplink.
+    static let videoUploadTimeout: TimeInterval = 600
     /// AI picture generation answers in 1–2 minutes.
     static let imageGenerationTimeout: TimeInterval = 240
 
@@ -79,19 +81,32 @@ final class APIClient {
 
     /// `POST /uploads` with a `multipart/form-data` field `file`.
     func uploadImage(jpegData: Data, filename: String = "photo.jpg") async throws -> LinkResponse {
+        try await upload("uploads", data: jpegData, filename: filename, mimeType: "image/jpeg")
+    }
+
+    /// `POST <path>` with one `multipart/form-data` field `file` (photo or video) and a JSON answer.
+    func upload<T: Decodable>(
+        _ path: String,
+        data fileData: Data,
+        filename: String,
+        mimeType: String,
+        timeout: TimeInterval = APIClient.uploadTimeout
+    ) async throws -> T {
         let boundary = "MIKAN-\(UUID().uuidString)"
-        var body = Data()
-        body.append(Data("--\(boundary)\r\n".utf8))
-        body.append(Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".utf8))
-        body.append(Data("Content-Type: image/jpeg\r\n\r\n".utf8))
-        body.append(jpegData)
-        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        let head = "--\(boundary)\r\n"
+            + "Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n"
+            + "Content-Type: \(mimeType)\r\n\r\n"
+        let tail = "\r\n--\(boundary)--\r\n"
+        var body = Data(capacity: fileData.count + head.utf8.count + tail.utf8.count)
+        body.append(Data(head.utf8))
+        body.append(fileData)
+        body.append(Data(tail.utf8))
         let data = try await send(
-            .post, "uploads", query: [], body: body,
+            .post, path, query: [], body: body,
             contentType: "multipart/form-data; boundary=\(boundary)",
-            timeout: Self.uploadTimeout
+            timeout: timeout
         )
-        return try decode(LinkResponse.self, from: data, path: "uploads")
+        return try decode(T.self, from: data, path: path)
     }
 
     // MARK: - Transport

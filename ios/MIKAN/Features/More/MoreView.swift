@@ -7,6 +7,12 @@ struct MoreView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    NavigationLink { SmmHomeView() } label: {
+                        Label("СММ-маркетолог", systemImage: "megaphone")
+                    }
+                    .badge(appState.badges.smmReview)
+                }
                 Section("Бот") {
                     NavigationLink { ChatsListView() } label: {
                         Label("Чаты", systemImage: "bubble.left.and.bubble.right")
