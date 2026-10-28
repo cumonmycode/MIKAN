@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// Screens of «СММ-маркетолог», pushed with `NavigationLink(value:)` anywhere under `SmmHomeView`. Every screen works
-/// in `SmmProfileStore.profile` (from the environment). Ids are server UUID strings; `month` is `YYYY-MM`.
+/// Screens of «СММ-маркетолог», pushed with `NavigationLink(value:)` — the home itself too, from «Ещё», whose stack
+/// declares the destination and owns the `SmmProfileStore`. A home pushed as a view (`NavigationLink { … }`) was
+/// re-created whenever «Ещё» redrew (badges refresh), and the screens pushed on top of it closed at once. Every screen
+/// works in `SmmProfileStore.profile` (from the environment). Ids are server UUID strings; `month` is `YYYY-MM`.
 nonisolated enum SmmRoute: Hashable, Sendable {
+    case home
     case post(id: String)
     /// «Новая публикация», prefilled from an idea or a day of the plan.
     case newPost(SmmPostDraft = SmmPostDraft())
@@ -60,6 +63,7 @@ struct SmmRouteDestination: View {
 
     var body: some View {
         switch route {
+        case .home: SmmHomeView()
         case .post(let id): SmmPostView(postId: id)
         case .newPost(let draft): SmmNewPostView(draft: draft)
         case .plan(let month): SmmPlanView(month: month)

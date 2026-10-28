@@ -4,12 +4,14 @@ struct MoreView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.permissions) private var permissions
     @State private var confirmsSignOut = false
+    /// The SMM profile switcher's state, kept here so the SMM screens survive redraws of «Ещё».
+    @State private var smmStore = SmmProfileStore()
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    NavigationLink { SmmHomeView() } label: {
+                    NavigationLink(value: SmmRoute.home) {
                         Label("СММ-маркетолог", systemImage: "megaphone")
                     }
                     .badge(appState.badges.smmReview)
@@ -103,6 +105,10 @@ struct MoreView: View {
             }
             .auraBackground()
             .navigationTitle("Ещё")
+            .navigationDestination(for: SmmRoute.self) { route in
+                SmmRouteDestination(route: route)
+                    .environment(smmStore)
+            }
             .refreshable { await appState.refreshBadges() }
             .confirmationDialog("Выйти из аккаунта?", isPresented: $confirmsSignOut, titleVisibility: .visible) {
                 Button("Выйти", role: .destructive) { appState.signOut() }

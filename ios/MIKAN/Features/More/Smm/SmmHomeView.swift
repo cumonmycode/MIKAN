@@ -8,7 +8,8 @@ struct SmmHomeView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppState.self) private var appState
     @Environment(ReferenceStore.self) private var reference
-    @State private var store = SmmProfileStore()
+    /// Owned by «Ещё» (`SmmRoute.home`), so it outlives redraws of this screen.
+    @Environment(SmmProfileStore.self) private var store
     @State private var overview = Remote<SmmOverview>()
 
     /// While the marketer writes, draws or plans, the home refreshes this often (Titan: twice the post poll).
@@ -56,11 +57,6 @@ struct SmmHomeView: View {
                 }
             }
         }
-        .navigationDestination(for: SmmRoute.self) { route in
-            SmmRouteDestination(route: route)
-                .environment(store)
-        }
-        .environment(store)
         .task(id: LoadKey(profile: store.profile, isEnabled: store.isEnabled)) { await run() }
         .onChange(of: store.profile) { overview.reset() }
         .refreshable { await reload() }
@@ -68,7 +64,8 @@ struct SmmHomeView: View {
     }
 
     private var profilePicker: some View {
-        Picker("Профиль", selection: $store.profile) {
+        @Bindable var store = store
+        return Picker("Профиль", selection: $store.profile) {
             ForEach(SmmProfile.allCases) { profile in
                 Text(store.title(of: profile)).tag(profile)
             }
@@ -163,7 +160,9 @@ struct SmmHomeView: View {
 #Preview {
     NavigationStack {
         SmmHomeView()
+            .navigationDestination(for: SmmRoute.self) { SmmRouteDestination(route: $0) }
     }
+    .environment(SmmProfileStore())
     .previewEnvironment()
 }
 #endif
