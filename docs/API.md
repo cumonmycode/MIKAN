@@ -164,6 +164,9 @@ The detailed statement adds `"lines"`: `[ { "date", "kind": "service"|"product",
 - A visit counts on its own date (studio date of `startsAt`) with its non-refunded sales, whenever they were paid; a
   product line counts on the day of its sale. `services.visits` — completed visits as master (a refunded one still
   counts, earning nothing); `days` — days worked: a completed visit, or a sale made (refunded later or not).
+- Line `revenue` — the line after its share of the receipt discount and the bonuses paid, which payroll takes off the
+  receipt's products (jewelry, goods) first, proportionally to their totals; a service line loses only what exceeds
+  them (analytics and reports still split the discount over every line by its total).
 - Line `materials` — the visit's materials split across its service lines by revenue; `category` — the service
   category (`tattoo` | `piercing` | `other` for custom lines), `null` for products; `percent` — `0` on days before the
   first rules version (the line is shown, earning nothing). Service lines of sales without an appointment earn no
@@ -2029,7 +2032,7 @@ payments.bonus − payments.certificate − certificate items`. Bonuses are spen
 lots first. Earned bonuses are available at once; a lot with `expiresAt` burns its unspent rest then (an `expire`
 operation, checked hourly). A refund returns the spent bonuses and takes back the earned ones (never below 0).
 Bonuses paid count as a discount: analytics `revenue` and payroll revenue exclude them (split across the lines like
-the sale discount).
+the sale discount; payroll takes them off the products first, see «PayrollStatement»).
 
 | Method | Path | Body | Response |
 |---|---|---|---|

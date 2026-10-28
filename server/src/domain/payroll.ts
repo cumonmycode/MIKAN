@@ -82,7 +82,8 @@ function servicePercent(rules: PayRules | null, category: string): number {
 }
 
 /**
- * Service lines of one visit: its sales' service items after the discount and the bonuses paid (a discount too),
+ * Service lines of one visit: its sales' service items after the discount and the bonuses paid (a discount too) — taken
+ * off the receipt's products first, so a service loses only what exceeds them (`productsFirst`) —
  * minus the visit's materials. Gift certificate lines are neither services nor products.
  */
 function visitLines(data: PayrollData, visit: PayrollVisit, versions: RuleVersion[], tz: string): SortedLine[] {
@@ -91,7 +92,7 @@ function visitLines(data: PayrollData, visit: PayrollVisit, versions: RuleVersio
   const served: Array<{ saleId: number; item: SaleItemRow; revenue: number }> = [];
   for (const sale of data.visitSales.get(visit.id) ?? []) {
     const items = data.visitItems.get(sale.id) ?? [];
-    const net = keptLineRevenues(sale, items);
+    const net = keptLineRevenues(sale, items, 'productsFirst');
     items.forEach((item, i) => {
       if (item.type === 'service' && keptUnits(item) > 0) served.push({ saleId: sale.id, item, revenue: net[i] ?? 0 });
     });
@@ -120,7 +121,7 @@ function productLines(data: PayrollData, employeeId: number, versions: RuleVersi
     const date = localDate(sale.createdAt, tz);
     const percent = rulesOn(versions, date)?.productPercent ?? 0;
     const items = data.sales.itemsBySale.get(sale.id) ?? [];
-    const net = keptLineRevenues(sale, items);
+    const net = keptLineRevenues(sale, items, 'productsFirst');
     items.forEach((item, i) => {
       if (item.type !== 'product' || keptUnits(item) <= 0) return;
       const revenue = net[i] ?? 0;

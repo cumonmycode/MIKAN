@@ -1,9 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { splitByWeight } from '../src/domain/payroll.js';
+import { allocateDiscountProductsFirst } from '../src/domain/sale-revenue.js';
 import { createTestApp, make, openShift, type TestApp } from './helpers.js';
 import { at, ok, pay, setRules, staff, statement, visit, type Staff } from './payroll-fixtures.js';
 
 // The studio is in Moscow (UTC+3); the test process runs in Asia/Tomsk (UTC+7, see vitest.config.ts).
+
+describe('allocateDiscountProductsFirst', () => {
+  const line = (type: string, total: number) => ({ type, total });
+
+  it('takes the discount off the products first, proportionally, and leaves the services whole', () => {
+    // The 28 Oct receipt: Нострил 2 000 + jewelry 1 000 + 600 + 600 + Флэт 1 800, 200 ₽ off.
+    const items = [line('service', 2000), line('product', 1000), line('product', 600), line('product', 600), line('service', 1800)];
+    expect(allocateDiscountProductsFirst(items, 200)).toEqual([2000, 909, 545, 546, 1800]);
+  });
+
+  it('moves only what exceeds the products onto the services', () => {
+    expect(allocateDiscountProductsFirst([line('service', 2000), line('product', 500)], 700)).toEqual([1800, 0]);
+    expect(allocateDiscountProductsFirst([line('service', 3000), line('service', 1000)], 400)).toEqual([2700, 900]);
+    expect(allocateDiscountProductsFirst([line('service', 2000), line('product', 500)], 0)).toEqual([2000, 500]);
+  });
+});
 
 describe('splitByWeight', () => {
   it('splits proportionally in whole rubles with the remainder on the last share', () => {
@@ -50,7 +67,8 @@ describe('payroll statement', () => {
     await setRules(t, fatima.id, {
       effectiveFrom: '2026-10-01', servicePercent: 40, categoryPercent: { tattoo: 50 }, productPercent: 10, deductMaterials: true, perDay: 1000,
     });
-    // 5 Oct: a piercing with jewelry, 400 ₽ off a 4 000 ₽ receipt rung up by the owner → 2 700 + 900.
+    // 5 Oct: a piercing with jewelry, 400 ₽ off a 4 000 ₽ receipt rung up by the owner: the discount comes off the
+    // jewelry first → 3 000 + 600.
     const first = await visit(t, fatima.id, clientId, [helix.id], '2026-10-05T08:00:00Z');
     at('2026-10-05T09:00:00Z');
     const firstSale = await pay(t.api, [{ type: 'service', serviceId: helix.id }, { type: 'product', productId: labret.id }], 3600, {
@@ -76,20 +94,20 @@ describe('payroll statement', () => {
       employee: { id: fatima.id, name: 'Фатима' },
       from: '2026-10-01',
       to: '2026-10-31',
-      services: { visits: 3, revenue: 7700, materials: 100, amount: 1080 + 2450 },
-      products: { revenue: 2900, amount: 290 },
+      services: { visits: 3, revenue: 8000, materials: 100, amount: 1200 + 2450 },
+      products: { revenue: 2600, amount: 260 },
       salary: 0,
       days: 4,
       perDay: 4000,
       adjustments: { bonus: 0, penalty: 0, advance: 0, payout: 0 },
-      earned: 3530 + 290 + 4000,
+      earned: 3650 + 260 + 4000,
       paid: 0,
-      due: 7820,
+      due: 7910,
       adjustmentItems: [],
     });
     expect(s.lines).toEqual([
-      { date: '2026-10-05', kind: 'service', appointmentId: first.id, saleId: firstSale.id, name: 'Прокол хеликса', category: 'piercing', revenue: 2700, materials: 0, percent: 40, amount: 1080 },
-      { date: '2026-10-05', kind: 'product', appointmentId: first.id, saleId: firstSale.id, name: 'Лабрет', category: null, revenue: 900, materials: 0, percent: 10, amount: 90 },
+      { date: '2026-10-05', kind: 'service', appointmentId: first.id, saleId: firstSale.id, name: 'Прокол хеликса', category: 'piercing', revenue: 3000, materials: 0, percent: 40, amount: 1200 },
+      { date: '2026-10-05', kind: 'product', appointmentId: first.id, saleId: firstSale.id, name: 'Лабрет', category: null, revenue: 600, materials: 0, percent: 10, amount: 60 },
       { date: '2026-10-06', kind: 'service', appointmentId: second.id, saleId: secondSale.id, name: 'Тату мини', category: 'tattoo', revenue: 5000, materials: 100, percent: 50, amount: 2450 },
       { date: '2026-10-08', kind: 'product', appointmentId: null, saleId: ownSale.id, name: 'Кольцо', category: null, revenue: 2000, materials: 0, percent: 10, amount: 200 },
     ]);

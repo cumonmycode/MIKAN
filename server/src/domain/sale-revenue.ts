@@ -23,6 +23,31 @@ export function allocateDiscount(items: Array<Pick<SaleItemRow, 'total'>>, disco
   });
 }
 
+/**
+ * How a sale's discount and bonus payment are split across its lines: `proportional` — by the line totals (revenue,
+ * analytics); `productsFirst` — off the product lines first (jewelry, goods), proportionally to their totals, and only
+ * what exceeds them off the services (payroll: a receipt discount does not cut a master's service while there are
+ * products to take it from).
+ */
+export type DiscountSplit = 'proportional' | 'productsFirst';
+
+/** `allocateDiscount` with the discount taken off the product lines first, the rest off the other lines. */
+export function allocateDiscountProductsFirst(items: Array<Pick<SaleItemRow, 'type' | 'total'>>, discount: number): number[] {
+  const isProduct = (item: Pick<SaleItemRow, 'type'>) => item.type === 'product';
+  const products = items.filter(isProduct);
+  const others = items.filter((item) => !isProduct(item));
+  const productsTotal = products.reduce((s, i) => s + i.total, 0);
+  const fromProducts = Math.min(discount, productsTotal);
+  const productNet = allocateDiscount(products, fromProducts);
+  const otherNet = allocateDiscount(others, discount - fromProducts);
+  let nextProduct = 0;
+  let nextOther = 0;
+  return items.map((item) => (isProduct(item) ? productNet[nextProduct++] : otherNet[nextOther++]) ?? 0);
+}
+
+const splitDiscount = (items: Array<Pick<SaleItemRow, 'type' | 'total'>>, discount: number, split: DiscountSplit): number[] =>
+  split === 'productsFirst' ? allocateDiscountProductsFirst(items, discount) : allocateDiscount(items, discount);
+
 /** Stored `sale_items.type` of a gift certificate line (sent to the apps as `service` with `certificateId`). */
 export const CERTIFICATE_LINE = 'certificate';
 
@@ -36,9 +61,10 @@ export const isCertificateLine = (item: Pick<SaleItemRow, 'type'>): boolean => i
 export function lineRevenues(
   sale: Pick<SaleRow, 'discount' | 'payBonus'>,
   items: Array<Pick<SaleItemRow, 'type' | 'total'>>,
+  split: DiscountSplit = 'proportional',
 ): number[] {
   const regular = items.filter((item) => !isCertificateLine(item));
-  const shared = allocateDiscount(regular, sale.discount + sale.payBonus);
+  const shared = splitDiscount(regular, sale.discount + sale.payBonus, split);
   let next = 0;
   return items.map((item) => (isCertificateLine(item) ? 0 : (shared[next++] ?? 0)));
 }
@@ -94,12 +120,13 @@ export const keptUnits = (item: Pick<SaleItemRow, 'quantity' | 'refundedQuantity
 export function keptLineRevenues(
   sale: Pick<SaleRow, 'discount' | 'payBonus' | 'refundedTotal'> & { keptRevenue: number },
   items: Array<Pick<SaleItemRow, 'type' | 'total' | 'price' | 'quantity' | 'refundedQuantity'>>,
+  split: DiscountSplit = 'proportional',
 ): number[] {
-  if (sale.refundedTotal === 0) return lineRevenues(sale, items);
+  if (sale.refundedTotal === 0) return lineRevenues(sale, items, split);
   const counted = (item: (typeof items)[number]) => !isCertificateLine(item) && keptUnits(item) > 0;
-  const kept = items.filter(counted).map((item) => ({ total: item.price * keptUnits(item) }));
+  const kept = items.filter(counted).map((item) => ({ type: item.type, total: item.price * keptUnits(item) }));
   const keptSubtotal = kept.reduce((sum, item) => sum + item.total, 0);
-  const shared = allocateDiscount(kept, Math.min(keptSubtotal, Math.max(0, keptSubtotal - sale.keptRevenue)));
+  const shared = splitDiscount(kept, Math.min(keptSubtotal, Math.max(0, keptSubtotal - sale.keptRevenue)), split);
   let next = 0;
   return items.map((item) => (counted(item) ? (shared[next++] ?? 0) : 0));
 }

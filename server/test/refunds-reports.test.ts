@@ -71,7 +71,8 @@ describe('partial refunds in reports, analytics, payroll and the cash register',
   it('counts the refund on its own day by its money and the kept units everywhere else', async () => {
     await ok('PUT', `/api/employees/${anna.id}/pay-rules`, { effectiveFrom: '2026-10-01', servicePercent: 40, productPercent: 10 });
     const sale = await paidVisit();
-    expect((await statement()).products).toEqual({ revenue: 2700, amount: 270 });
+    // Payroll takes the 550 ₽ discount off the labrets first: 3 000 − 550; the piercing keeps its 2 500.
+    expect((await statement()).products).toEqual({ revenue: 2450, amount: 245 });
 
     // 14 Oct: one labret comes back — 1 350 (cash 805, transfer 545).
     at('2026-10-14T09:00:00.000Z');
@@ -123,10 +124,11 @@ describe('partial refunds in reports, analytics, payroll and the cash register',
     expect((await analytics(DAY13, DAY14)).revenue).toMatchObject({ gross: 4950, refunds: 0, net: 4950, kept: 3600 });
 
     const p = await statement();
-    expect(p).toMatchObject({ services: { visits: 1, revenue: 2250, amount: 900 }, products: { revenue: 1350, amount: 135 } });
+    // The kept 1 labret + piercing (4 000) brought 3 600: the 400 ₽ off comes off the labret, the piercing stays whole.
+    expect(p).toMatchObject({ services: { visits: 1, revenue: 2500, amount: 1000 }, products: { revenue: 1100, amount: 110 } });
     expect(p.lines.map((l: Json) => [l.kind, l.name, l.revenue, l.amount])).toEqual([
-      ['service', 'Прокол мочки', 2250, 900],
-      ['product', 'Лабрет — 8 мм', 1350, 135],
+      ['service', 'Прокол мочки', 2500, 1000],
+      ['product', 'Лабрет — 8 мм', 1100, 110],
     ]);
 
     // The rest comes back too: the sale behaves as a refunded sale did before.

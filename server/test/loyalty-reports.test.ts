@@ -109,7 +109,7 @@ describe('loyalty in reports and payroll', () => {
     const appointment = await visit(t, fatima.id, client.id, [lobe.id], '2026-10-15T08:00:00Z');
     at('2026-10-15T09:00:00.000Z');
     await openShift(t);
-    // A 3 000 ₽ piercing and a 1 000 ₽ ring: 1 200 ₽ of bonuses split 900 / 300.
+    // A 3 000 ₽ piercing and a 1 000 ₽ ring: 1 200 ₽ of bonuses come off the ring first — 200 / 1 000.
     const paid = await sell({
       appointmentId: appointment.id,
       items: [service(), { type: 'product', productId: ring.id, quantity: 1 }],
@@ -122,10 +122,10 @@ describe('loyalty in reports and payroll', () => {
     });
     const s = await statement(t.api, fatima.id, '2026-10-01', '2026-10-31');
     expect(s.lines).toEqual([
-      { date: '2026-10-15', kind: 'service', appointmentId: appointment.id, saleId: paid.id, name: 'Прокол мочки', category: 'piercing', revenue: 2100, materials: 0, percent: 40, amount: 840 },
-      { date: '2026-10-15', kind: 'product', appointmentId: appointment.id, saleId: paid.id, name: 'Кольцо', category: null, revenue: 700, materials: 0, percent: 10, amount: 70 },
+      { date: '2026-10-15', kind: 'service', appointmentId: appointment.id, saleId: paid.id, name: 'Прокол мочки', category: 'piercing', revenue: 2800, materials: 0, percent: 40, amount: 1120 },
+      { date: '2026-10-15', kind: 'product', appointmentId: appointment.id, saleId: paid.id, name: 'Кольцо', category: null, revenue: 0, materials: 0, percent: 10, amount: 0 },
       { date: '2026-10-15', kind: 'product', appointmentId: null, saleId: gift.id, name: 'Кольцо', category: null, revenue: 1000, materials: 0, percent: 10, amount: 100 },
     ]);
-    expect(s).toMatchObject({ services: { revenue: 2100, amount: 840 }, products: { revenue: 1700, amount: 170 } });
+    expect(s).toMatchObject({ services: { revenue: 2800, amount: 1120 }, products: { revenue: 1000, amount: 100 } });
   });
 });
