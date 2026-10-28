@@ -5,6 +5,7 @@ import SwiftUI
 struct ServicesListView: View {
     @Environment(APIClient.self) private var api
     @Environment(ReferenceStore.self) private var reference
+    @Environment(\.permissions) private var permissions
     @State private var services = Remote<[Service]>()
     @State private var search = ""
     @State private var showsNewEditor = false
@@ -51,10 +52,12 @@ struct ServicesListView: View {
         .remoteErrorAlert(services)
         .navigationTitle("Услуги")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Новая услуга", systemImage: "plus") { showsNewEditor = true }
-                    // New services are merged into the loaded catalog; without it there is nothing to merge into.
-                    .disabled(services.value == nil)
+            if permissions.editsCatalog {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Новая услуга", systemImage: "plus") { showsNewEditor = true }
+                        // New services are merged into the loaded catalog; without it there is nothing to merge into.
+                        .disabled(services.value == nil)
+                }
             }
         }
         .navigationDestination(item: $openedServiceID) { id in
@@ -85,8 +88,10 @@ struct ServicesListView: View {
             } description: {
                 Text("Добавьте услуги с ценами и длительностью — они нужны для записи, кассы и ответов бота.")
             } actions: {
-                Button("Добавить услугу") { showsNewEditor = true }
-                    .buttonStyle(.glassProminent)
+                if permissions.editsCatalog {
+                    Button("Добавить услугу") { showsNewEditor = true }
+                        .buttonStyle(.glassProminent)
+                }
             }
         } else {
             ContentUnavailableView.search(text: search)
@@ -180,6 +185,9 @@ private struct ServiceRow: View {
         var parts = [DateText.duration(minutes: service.durationMin)]
         if !service.variants.isEmpty {
             parts.append(Plural.count(service.variants.count, one: "вариант", few: "варианта", many: "вариантов"))
+        }
+        if !service.masterPrices.isEmpty {
+            parts.append("у мастеров свои цены")
         }
         if service.requiresDeposit {
             parts.append("предоплата \(Money.format(service.depositAmount))")

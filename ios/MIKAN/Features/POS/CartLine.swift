@@ -6,6 +6,8 @@ struct CartLine: Identifiable, Hashable {
         /// when it was added.
         case product(id: Int, variantId: Int, stock: Int)
         case service(id: Int?)
+        /// A gift certificate to be issued by the sale (`unitPrice` is its nominal, quantity always 1).
+        case certificate
     }
 
     let id: UUID
@@ -17,6 +19,10 @@ struct CartLine: Identifiable, Hashable {
     var unitPrice: Int
     /// Jewelry or goods for a product line (drives its icon); `nil` for services.
     let productKind: ProductKind?
+    /// Who a gift certificate is for («Маше»); certificate lines only.
+    var recipientName = ""
+    /// A note kept on a gift certificate (set elsewhere; sent back unchanged); certificate lines only.
+    var certificateNote: String?
 
     init(
         kind: Kind,
@@ -24,7 +30,9 @@ struct CartLine: Identifiable, Hashable {
         sizeName: String? = nil,
         quantity: Int = 1,
         unitPrice: Int,
-        productKind: ProductKind? = nil
+        productKind: ProductKind? = nil,
+        recipientName: String = "",
+        certificateNote: String? = nil
     ) {
         self.id = UUID()
         self.kind = kind
@@ -33,11 +41,26 @@ struct CartLine: Identifiable, Hashable {
         self.quantity = quantity
         self.unitPrice = unitPrice
         self.productKind = productKind
+        self.recipientName = recipientName
+        self.certificateNote = certificateNote.nonEmpty
+    }
+
+    /// «Подарочный сертификат» for `amount` rubles; the sale issues it with a code.
+    static func certificate(amount: Int, recipientName: String, note: String? = nil) -> CartLine {
+        CartLine(
+            kind: .certificate, name: CertificateRules.lineName, unitPrice: amount,
+            recipientName: recipientName.trimmed, certificateNote: note
+        )
     }
 
     /// A line of a saved open receipt. A product line without its product or size cannot be sold, so it is `nil`
-    /// (the server always saves both); a size that is gone has no stock left.
+    /// (the server always saves both); a size that is gone has no stock left. A certificate to sell comes as a
+    /// `service` line with `certificate` set.
     init?(item: OpenReceiptItem) {
+        if let certificate = item.certificate {
+            self = .certificate(amount: item.price, recipientName: certificate.recipientName ?? "", note: certificate.note)
+            return
+        }
         switch item.type {
         case .product:
             guard let productId = item.productId, let variantId = item.variantId else { return nil }
@@ -51,11 +74,17 @@ struct CartLine: Identifiable, Hashable {
             )
         case .service:
             self.init(kind: .service(id: item.serviceId), name: item.name, quantity: item.quantity, unitPrice: item.price)
+        case .certificate:
+            self = .certificate(amount: item.price, recipientName: "")
+        case .unknown:
+            // A line of a newer kind cannot be sold by this build.
+            return nil
         }
     }
 
-    /// Symbol of the line: a service, a piece of jewelry or other goods.
+    /// Symbol of the line: a service, a gift certificate, a piece of jewelry or other goods.
     var symbol: String {
+        if isCertificate { return PaymentLine.certificateSymbol }
         guard productId != nil else { return "hands.and.sparkles" }
         return productKind == .goods ? CatalogSection.goods.symbol : CatalogSection.jewelry.symbol
     }
@@ -78,7 +107,15 @@ struct CartLine: Identifiable, Hashable {
         return nil
     }
 
-    var isValid: Bool { quantity > 0 && unitPrice >= 0 && !name.trimmed.isEmpty }
+    var isCertificate: Bool { kind == .certificate }
+
+    var isValid: Bool {
+        if isCertificate {
+            return quantity == 1 && CertificateRules.isValidAmount(unitPrice)
+                && recipientName.trimmed.count <= CertificateRules.recipientNameLimit
+        }
+        return quantity > 0 && unitPrice >= 0 && !name.trimmed.isEmpty
+    }
 
     /// Lines of one size share its stock (the same size at an edited price is a separate line).
     func isSameSize(as other: CartLine) -> Bool {
@@ -95,6 +132,11 @@ struct CartLine: Identifiable, Hashable {
             )
         case .service(let id):
             SaleItemBody(type: .service, productId: nil, serviceId: id, name: name.trimmed, quantity: quantity, price: unitPrice)
+        case .certificate:
+            SaleItemBody(
+                type: .certificate, productId: nil, serviceId: nil, name: nil, quantity: 1, price: unitPrice,
+                recipientName: recipientName.nonEmpty, note: certificateNote.nonEmpty
+            )
         }
     }
 }

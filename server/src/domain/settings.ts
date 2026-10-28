@@ -16,7 +16,70 @@ export interface StudioSettings {
   workdayStart: string;
   /** Closing time "HH:MM" ("24:00" = midnight), later than `workdayStart`: the calendar ends here. */
   workdayEnd: string;
+  /** Prepayment rules on a cancellation / no-show (see domain/cancellation.ts). */
+  cancellation: CancellationRules;
+  /** Where clients leave a review: `https://…` or "" (none). */
+  reviewLinks: ReviewLinks;
+  /** Client-facing booking through the bot, the Mini App and the booking page (see domain/online-booking.ts). */
+  onlineBooking: OnlineBookingSettings;
+  /** The till (see domain/sale-messages.ts). */
+  pos: PosSettings;
 }
+
+export interface PosSettings {
+  /** The bot sends the receipt to the client's Telegram after a paid sale and tells them about a refund. */
+  sendReceipt: boolean;
+}
+
+export interface OnlineBookingSettings {
+  /** `false` — the booking page is closed and the bot falls back to booking requests. */
+  enabled: boolean;
+  /** The earliest start offered: at least this many minutes from now (0…2880). */
+  leadMinutes: number;
+  /** How far ahead starts are offered, in days (1…180). */
+  horizonDays: number;
+  /** How long an unpaid booking holds its time while the client pays the prepayment (5…60 minutes). */
+  holdMinutes: number;
+  /** The grid of offered starts from the beginning of the master's working day: 15 | 30 | 60 minutes. */
+  stepMinutes: number;
+  /** Shown to clients on the booking page (≤ 500 characters). */
+  note: string;
+  /**
+   * An unconfirmed booking rejects itself this many hours after it was made (or 2 hours before its start, if that
+   * comes first); 1…168, `null` = never (see domain/online-booking-lifecycle.ts).
+   */
+  confirmationHours: number | null;
+}
+
+export interface CancellationRules {
+  /** A cancellation at least this many hours before the start is free; 0 = never free. */
+  freeHours: number;
+  /** Share (0…100) of the held prepayment kept after a later cancellation. */
+  lateRetainPercent: number;
+  /** Share (0…100) of the held prepayment kept after a no-show. */
+  noShowRetainPercent: number;
+  /** The server records that retain itself when the appointment is cancelled late or missed. */
+  autoRetain: boolean;
+}
+
+export interface ReviewLinks {
+  yandex: string;
+  twogis: string;
+  google: string;
+}
+
+/** `freeHours` limit: two weeks. */
+export const FREE_CANCELLATION_HOURS_MAX = 14 * 24;
+export const REVIEW_LINK_MAX = 500;
+/** Limits of `StudioSettings.onlineBooking`. */
+export const ONLINE_LEAD_MAX = 2 * 24 * 60;
+export const ONLINE_HORIZON_MAX = 180;
+export const ONLINE_HOLD_MIN = 5;
+export const ONLINE_HOLD_MAX = 60;
+export const ONLINE_STEPS = [15, 30, 60] as const;
+export const ONLINE_NOTE_MAX = 500;
+export const ONLINE_CONFIRMATION_MIN = 1;
+export const ONLINE_CONFIRMATION_MAX = 7 * 24;
 
 export interface BotSettingsStored {
   enabled: boolean;
@@ -71,6 +134,10 @@ export const DEFAULT_STUDIO: StudioSettings = {
   timezone: 'Europe/Moscow',
   workdayStart: '11:00',
   workdayEnd: '21:00',
+  cancellation: { freeHours: 24, lateRetainPercent: 100, noShowRetainPercent: 100, autoRetain: false },
+  reviewLinks: { yandex: '', twogis: '', google: '' },
+  onlineBooking: { enabled: true, leadMinutes: 120, horizonDays: 60, holdMinutes: 15, stepMinutes: 30, note: '', confirmationHours: 24 },
+  pos: { sendReceipt: true },
 };
 
 export const DEFAULT_BOT: BotSettingsStored = {
@@ -93,6 +160,11 @@ const KEY_STAFF_CHAT = 'staffChatId';
 const KEY_STAFF_CODE = 'staffCode';
 const KEY_BOT_USERNAME = 'botUsername';
 const KEY_DIGESTS_SENT = 'digestsSent';
+const KEY_ALERTS = 'alerts';
+const KEY_RETENTION = 'retention';
+const KEY_DISMISSED_DUPLICATES = 'clientDuplicatesDismissed';
+const KEY_WAITLIST_FREED = 'waitlistFreed';
+const KEY_OFFSITE_UPLOADS = 'offsiteUploads';
 
 /** JSON value of a settings key, null when missing or unreadable (also used by the SMM module for its own keys). */
 export function readKey<T>(db: DbOrTx, key: string): T | null {
@@ -135,9 +207,24 @@ export function workdayFromText(text: string): Pick<StudioSettings, 'workdayStar
   return { workdayStart: formatTimeOfDay(start), workdayEnd: formatTimeOfDay(end) };
 }
 
+type StoredStudioValue = Partial<Omit<StudioSettings, 'cancellation' | 'reviewLinks' | 'onlineBooking' | 'pos'>> & {
+  cancellation?: Partial<CancellationRules>;
+  reviewLinks?: Partial<ReviewLinks>;
+  onlineBooking?: Partial<OnlineBookingSettings>;
+  pos?: Partial<PosSettings>;
+};
+
 export function getStudioSettings(db: DbOrTx): StudioSettings {
-  const stored = readKey<Partial<StudioSettings>>(db, KEY_STUDIO) ?? {};
-  const merged = { ...DEFAULT_STUDIO, ...stored };
+  const stored = readKey<StoredStudioValue>(db, KEY_STUDIO) ?? {};
+  // Settings saved before the cancellation rules / review links / online booking / the till existed take the defaults.
+  const merged = {
+    ...DEFAULT_STUDIO,
+    ...stored,
+    cancellation: { ...DEFAULT_STUDIO.cancellation, ...stored.cancellation },
+    reviewLinks: { ...DEFAULT_STUDIO.reviewLinks, ...stored.reviewLinks },
+    onlineBooking: { ...DEFAULT_STUDIO.onlineBooking, ...stored.onlineBooking },
+    pos: { ...DEFAULT_STUDIO.pos, ...stored.pos },
+  };
   if (stored.workdayStart !== undefined && stored.workdayEnd !== undefined) return merged;
   return { ...merged, ...workdayFromText(merged.workingHours) };
 }
@@ -180,6 +267,21 @@ export function setDigestsSent(db: DbOrTx, value: DigestsSent): void {
   writeKey(db, KEY_DIGESTS_SENT, value);
 }
 
+/** An alert kind's state: whether it is raised, since when, and when the staff were last told. */
+export interface AlertState {
+  active: boolean;
+  since: number;
+  lastSentAt: number;
+}
+
+export function getAlertStates(db: DbOrTx): Record<string, AlertState> {
+  return readKey<Record<string, AlertState>>(db, KEY_ALERTS) ?? {};
+}
+
+export function setAlertStates(db: DbOrTx, value: Record<string, AlertState>): void {
+  writeKey(db, KEY_ALERTS, value);
+}
+
 export function studioTimezone(db: DbOrTx): string {
   return getStudioSettings(db).timezone;
 }
@@ -217,4 +319,51 @@ export function setCachedBotUsername(db: DbOrTx, username: string): void {
 export function ensureDefaultSettings(db: DbOrTx): void {
   if (readKey(db, KEY_STUDIO) === null) writeKey(db, KEY_STUDIO, DEFAULT_STUDIO);
   if (readKey(db, KEY_BOT) === null) writeKey(db, KEY_BOT, DEFAULT_BOT);
+}
+
+/** The stored retention settings as saved (domain/retention-settings.ts fills in the defaults). */
+export function readRetentionStored(db: DbOrTx): unknown {
+  return readKey<unknown>(db, KEY_RETENTION);
+}
+
+export function writeRetentionStored(db: DbOrTx, value: unknown): void {
+  writeKey(db, KEY_RETENTION, value);
+}
+
+/** Client pairs the staff marked as different people (domain/client-duplicates.ts): `"12:34"`, smaller id first. */
+export function getDismissedDuplicatePairs(db: DbOrTx): string[] {
+  const value = readKey<unknown>(db, KEY_DISMISSED_DUPLICATES);
+  return Array.isArray(value) ? value.filter((pair): pair is string => typeof pair === 'string') : [];
+}
+
+export function setDismissedDuplicatePairs(db: DbOrTx, pairs: readonly string[]): void {
+  writeKey(db, KEY_DISMISSED_DUPLICATES, pairs);
+}
+
+/** Freed time waiting for the waitlist check (domain/waitlist-store.ts validates the items). */
+export function readWaitlistFreed(db: DbOrTx): unknown {
+  return readKey<unknown>(db, KEY_WAITLIST_FREED);
+}
+
+export function writeWaitlistFreed(db: DbOrTx, value: unknown): void {
+  writeKey(db, KEY_WAITLIST_FREED, value);
+}
+
+/** The last photo archive sent off-site (domain/offsite-uploads.ts): the manifest hash of its file set. */
+export interface OffsiteUploadsState {
+  hash: string;
+  /** A fingerprint of the storage (endpoint, bucket, prefix) and the encryption key it was sent to and with. */
+  target: string;
+  key: string;
+  files: number;
+  uploadedAt: number;
+}
+
+export function getOffsiteUploads(db: DbOrTx): OffsiteUploadsState | null {
+  const value = readKey<OffsiteUploadsState>(db, KEY_OFFSITE_UPLOADS);
+  return value && typeof value.hash === 'string' ? value : null;
+}
+
+export function setOffsiteUploads(db: DbOrTx, value: OffsiteUploadsState): void {
+  writeKey(db, KEY_OFFSITE_UPLOADS, value);
 }

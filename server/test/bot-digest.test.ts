@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dueDigest, eveningDigest, morningDigest, sendDueDigests } from '../src/bot/digest.js';
 import { cashShifts, employees, openReceipts, sales } from '../src/db/schema.js';
 import { setChatEmployee, upsertChat } from '../src/domain/bot-chats.js';
-import { createTestApp, make, type TestApp } from './helpers.js';
+import { createTestApp, make, openShift, type TestApp } from './helpers.js';
 
 const HOUR = 3_600_000;
 /** Monday 19 October 2026, 09:40 in Moscow (UTC+3). */
@@ -39,6 +39,7 @@ describe('staff digests', () => {
     upsertChat(t.ctx.db, CLIENT_CHAT, { telegramName: 'Клиент', username: null });
   });
   afterEach(async () => {
+    vi.useRealTimers();
     await t.close();
   });
 
@@ -70,6 +71,57 @@ describe('staff digests', () => {
     expect(text).toContain('• 🧾 Открытые чеки: 1 — закройте или удалите');
     expect(text).toContain('• 🏦 Смена открыта — в кассе должно быть **6 000 ₽**. Не забудьте закрыть');
     expect(text).toContain('📆 **Завтра — 1 запись**\n• **10:00** Олег — Мочка · вы · 1 600 ₽ ⏳\n⏳ — ждём предоплату');
+  });
+
+  it('the evening revenue follows analytics: without bonuses and certificates sold, net of the refunds made today', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const sell = async (clientId: number, items: object[], payments: object) => {
+      const res = await t.api('POST', '/api/sales', { clientId, items, discount: 0, payments });
+      expect(res.statusCode).toBe(200);
+      return res.json();
+    };
+    const lobeLine = { type: 'service', serviceId: lobe.id, quantity: 1 };
+    // Yesterday's sale, refunded today.
+    vi.setSystemTime(EVENING - 26 * HOUR);
+    await openShift(t);
+    const yesterday = await sell(anna.id, [lobeLine], { transfer: 1600 });
+    vi.setSystemTime(EVENING - 3 * HOUR);
+    await t.api('POST', `/api/clients/${oleg.id}/bonuses`, { amount: 1000, note: 'Перенос' });
+    await sell(oleg.id, [lobeLine], { cash: 1200, bonus: 400 });
+    const gift = await sell(oleg.id, [{ type: 'certificate', price: 5000, recipientName: 'Маше' }], { transfer: 5000 });
+    const code = (gift.items[0].name as string).replace('Подарочный сертификат ', '');
+    await sell(anna.id, [lobeLine], { card: 600, certificates: [{ code, amount: 1000 }] });
+    expect((await t.api('POST', `/api/sales/${yesterday.id}/refund`, { reason: 'Отказ', restock: false })).statusCode).toBe(200);
+
+    const text = eveningDigest(t.ctx.db, EVENING, admin());
+    // Sales 1 200 + 0 + 1 600 = 2 800 made, 1 600 refunded.
+    expect(text).toContain(
+      '💰 **Выручка — 1 200 ₽**\n' +
+        '• 3 чека · средний 933 ₽\n' +
+        '• Наличные 1 200 ₽ · перевод 5 000 ₽ · карта 600 ₽ · бонусами 400 ₽ · сертификатом 1 000 ₽\n' +
+        '• 🎁 Продано сертификатов: 1 на 5 000 ₽\n' +
+        '• ↩️ Возвраты: 1 600 ₽',
+    );
+    const analytics = (
+      await t.api('GET', `/api/reports/analytics?from=${msk('2026-10-19T00:00:00')}&to=${msk('2026-10-20T00:00:00')}`)
+    ).json();
+    expect(analytics.revenue).toMatchObject({ net: 1200, salesCount: 3, averageCheck: 933, refunds: 1600 });
+  });
+
+  it('the evening digest names refunds even on a day without sales, and leaves out bonuses and certificates when none', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(EVENING - 26 * HOUR);
+    await openShift(t);
+    const res = await t.api('POST', '/api/sales', {
+      clientId: anna.id, items: [{ type: 'service', serviceId: lobe.id, quantity: 1 }], discount: 0, payments: { transfer: 1600 },
+    });
+    vi.setSystemTime(EVENING - HOUR);
+    const refund = await t.api('POST', `/api/sales/${res.json().id}/refund`, { reason: 'Отказ', restock: false });
+    expect(refund.statusCode).toBe(200);
+    const text = eveningDigest(t.ctx.db, EVENING, admin());
+    expect(text).toContain('💰 Продаж сегодня не было\n• ↩️ Возвраты: 1 600 ₽');
+    expect(text).not.toContain('бонусами');
+    expect(text).not.toContain('сертификат');
   });
 
   it('a shift left open from an earlier day is flagged in the morning', async () => {

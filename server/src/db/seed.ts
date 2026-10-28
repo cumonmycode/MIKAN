@@ -33,6 +33,8 @@ export function seedDatabase(db: Db, config: Pick<Config, 'admin'>): void {
           passwordHash: bcrypt.hashSync(config.admin.password, BCRYPT_ROUNDS),
           color: DEFAULT_EMPLOYEE_COLOR,
           isMaster: true,
+          // The account created at install owns the studio (docs/API.md «Roles»).
+          role: 'owner',
           active: true,
           createdAt: now,
           updatedAt: now,

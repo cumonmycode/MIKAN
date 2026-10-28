@@ -4,6 +4,7 @@ import SwiftUI
 /// (`DELETE /bot/chats/:chatId/employee`, after a confirmation).
 struct StaffChatBanner: View {
     @Environment(APIClient.self) private var api
+    @Environment(\.permissions) private var permissions
 
     let chatId: Int64
     let employee: EmployeeRef
@@ -24,19 +25,22 @@ struct StaffChatBanner: View {
                 .font(.footnote)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(role: .destructive) {
-                confirmsUnlink = true
-            } label: {
-                if isUnlinking {
-                    ProgressView()
-                } else {
-                    Text("Отвязать")
+            // Staff chat binding is for the owner and admin.
+            if permissions.editsSettings {
+                Button(role: .destructive) {
+                    confirmsUnlink = true
+                } label: {
+                    if isUnlinking {
+                        ProgressView()
+                    } else {
+                        Text("Отвязать")
+                    }
                 }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .disabled(isUnlinking)
+                .accessibilityLabel("Отвязать сотрудника")
             }
-            .buttonStyle(.glass)
-            .controlSize(.small)
-            .disabled(isUnlinking)
-            .accessibilityLabel("Отвязать сотрудника")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

@@ -127,8 +127,13 @@ nonisolated struct PaymentSplit: Equatable, Sendable {
     /// What is due now (total minus the applied prepayment), paid entirely by `method`.
     /// The prepayment is a separate component of the sale (`Payments.deposit`), never a method's share.
     static func single(_ method: PaymentMethod, total: Int, deposit: Int) -> PaymentSplit {
+        single(method, due: CheckoutRules.amountDue(total: total, deposit: deposit))
+    }
+
+    /// `due` (what is left after the prepayment, bonuses and certificates) paid entirely by `method`.
+    static func single(_ method: PaymentMethod, due: Int) -> PaymentSplit {
         var split = PaymentSplit()
-        split[method] = CheckoutRules.amountDue(total: total, deposit: deposit)
+        split[method] = max(0, due)
         return split
     }
 }
@@ -158,12 +163,16 @@ nonisolated enum CheckoutRules {
         max(0, deposit) - depositApplied(deposit, total: total)
     }
 
-    /// The payment methods must cover exactly the amount due (the prepayment is applied on top of them).
+    /// The payment methods must cover exactly the amount due (the prepayment, then `credits` — bonuses and gift
+    /// certificates, already capped to what is left — are applied on top of them). `discountLimit` — what the
+    /// discount may reach (the subtotal without gift certificates sold); the whole subtotal when omitted.
     static func canSubmit(
-        lineCount: Int, linesValid: Bool, subtotal: Int, discount: Int, deposit: Int = 0, split: PaymentSplit
+        lineCount: Int, linesValid: Bool, subtotal: Int, discount: Int, discountLimit: Int? = nil, deposit: Int = 0,
+        credits: Int = 0, split: PaymentSplit
     ) -> Bool {
-        guard lineCount > 0, linesValid, isDiscountValid(discount, subtotal: subtotal) else { return false }
-        return split.isBalanced(for: amountDue(total: total(subtotal: subtotal, discount: discount), deposit: deposit))
+        guard lineCount > 0, linesValid, isDiscountValid(discount, subtotal: discountLimit ?? subtotal) else { return false }
+        let due = amountDue(total: total(subtotal: subtotal, discount: discount), deposit: deposit)
+        return split.isBalanced(for: max(0, due - max(0, credits)))
     }
 }
 

@@ -249,10 +249,10 @@ final class POSSizeTextTests: XCTestCase {
         XCTAssertEqual(ProductTileText.stock(SizeFixtures.ring(quantity: 0)), "Нет")
     }
 
-    func testSizePickerRowsShowPriceStockAndWhatIsInTheReceipt() throws {
+    func testSizeChipsShowPriceStockAndWhatIsInTheReceipt() throws {
         let labret = SizeFixtures.labret()
         let inReceipt = [12: 1]
-        let options = SizePickerOption.options(for: labret) { inReceipt[$0] ?? 0 }
+        let options = SizeOption.options(for: labret) { inReceipt[$0] ?? 0 }
 
         XCTAssertEqual(options.map(\.id), [11, 12, 13], "in the staff's order")
         XCTAssertEqual(options.map(\.title), ["6 мм", "8 мм", "10 мм"])
@@ -262,6 +262,9 @@ final class POSSizeTextTests: XCTestCase {
         XCTAssertEqual(options.map(\.isAvailable), [true, true, false], "out-of-stock sizes cannot be picked")
         XCTAssertEqual(options.map(\.inReceiptText), [nil, "В чеке: 1", nil])
         XCTAssertEqual(options.map(\.isStockInReceipt), [false, true, false], "the only 8 мм is already in the receipt")
+        XCTAssertEqual(options.map(\.canAdd), [true, false, false], "a chip adds only what the stock still has")
+        XCTAssertTrue(SizeOption.showsPrices(options), "10 мм costs more: prices go on the chips")
+        XCTAssertFalse(SizeOption.showsPrices(Array(options.prefix(2))))
 
         XCTAssertEqual(options[1].accessibilityLabel, "8 мм, \(Money.format(1_500)), мало: 1 шт, в чеке: 1")
         XCTAssertEqual(options[2].accessibilityLabel, "10 мм, \(Money.format(1_700)), нет в наличии")

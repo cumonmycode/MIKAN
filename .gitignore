@@ -23,8 +23,9 @@ xcuserdata/
 # Client data dumps (personal data)
 import/
 
-# Cloudflare Wrangler local cache (account id, auth state)
+# Cloudflare Wrangler local cache (account id, auth state) and local secrets for `wrangler dev`
 .wrangler/
+.dev.vars*
 
 # Claude Code local state
 .claude/worktrees/

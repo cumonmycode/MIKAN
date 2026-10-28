@@ -269,32 +269,110 @@ struct OpenReceiptTests {
         #expect(OpenReceiptList.newer(first, nil) == first)
     }
 
-    @Test("Row texts: who, the visit, lines and who opened it")
-    func rowTexts() throws {
+    @Test("«Открыл(а)» says who opened a receipt and when; another day adds the date")
+    func openedText() throws {
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = try #require(TimeZone(identifier: "UTC"))
-        let visit = Self.appointment(deposit: 2_000)
         let created = Fixtures.referenceDate
-
-        #expect(OpenReceiptText.who(Self.receipt(appointment: visit, client: Self.ivan)) == "По записи · Иван Петров")
-        #expect(OpenReceiptText.who(Self.receipt(client: Self.ivan)) == "Иван Петров")
-        #expect(OpenReceiptText.who(Self.receipt()) == "Без клиента")
-
-        let time = DateText.timeRange(visit.startsAt, visit.endsAt)
-        #expect(OpenReceiptText.appointmentLine(visit) == "\(time) · Хеликс · Анна")
-
-        #expect(OpenReceiptText.contents(itemCount: 0) == "Пусто")
-        #expect(OpenReceiptText.contents(itemCount: 3) == "3 позиции")
-
         let today = created.addingTimeInterval(3_600)
         let receipt = Self.receipt(items: [Self.helix, Self.spray], createdAt: created)
-        #expect(OpenReceiptText.details(receipt, now: today, calendar: utc) == "3 позиции · Открыл(а) Анна · \(DateText.time(created))")
+
+        #expect(OpenReceiptText.opened(receipt, now: today, calendar: utc) == "Открыл(а) Анна · \(DateText.time(created))")
         #expect(
             OpenReceiptText.opened(receipt, now: created.addingTimeInterval(2 * 86_400), calendar: utc)
                 == "Открыл(а) Анна · \(DateText.dateTime(created))",
             "left from another day"
         )
         #expect(OpenReceiptText.opened(Self.receipt(openedBy: nil), now: today, calendar: utc) == "Открыт · \(DateText.time(created))")
+    }
+
+    // MARK: «К оплате»
+
+    @Test("«К оплате» merges open receipts and the visits not started yet, earliest first, a receipt before a visit")
+    func paymentDueItems() {
+        let start = Fixtures.referenceDate
+        let laterVisit = Self.appointment(id: 1, startsAt: start.addingTimeInterval(7_200))
+        let startedElsewhere = Self.appointment(id: 2, startsAt: start, receiptId: 5)
+        let inProgress = Self.appointment(id: 3, startsAt: start.addingTimeInterval(3_600))
+        let receipts = [
+            Self.receipt(id: 6, appointment: inProgress),
+            Self.receipt(id: 7, createdAt: start.addingTimeInterval(1_800)),
+            Self.receipt(id: 8, createdAt: start.addingTimeInterval(7_200)),
+        ]
+
+        let items = PaymentDueList.items(receipts: receipts, visits: [laterVisit, startedElsewhere, inProgress])
+
+        #expect(items.map(\.id) == ["receipt-7", "receipt-6", "receipt-8", "visit-1"])
+        #expect(items.map(\.amount) == [0, 0, 0, 3_000], "a receipt's total, a visit's price")
+    }
+
+    @Test("«Мои» keeps a master's visits and the receipts they opened without one; a master starts on it while they have some")
+    func paymentDueScope() {
+        let master = Employee(
+            id: 2, name: "Анна", login: "anna", phone: nil, color: nil, isMaster: true, role: .master, active: true,
+            createdAt: Fixtures.referenceDate
+        )
+        var admin = master
+        admin.isMaster = false
+        var othersVisit = Self.appointment(id: 10)
+        othersVisit.master = EmployeeRef(id: 3, name: "Фатима", color: nil)
+        let items = PaymentDueList.items(
+            receipts: [
+                Self.receipt(id: 6, appointment: Self.appointment(id: 4)),
+                Self.receipt(id: 7),
+                Self.receipt(id: 8, openedBy: EmployeeRef(id: 3, name: "Фатима", color: nil)),
+            ],
+            visits: [othersVisit]
+        )
+
+        #expect(PaymentDueList.filtered(items, scope: .mine, employeeId: 2).map(\.id) == ["receipt-6", "receipt-7"])
+        #expect(PaymentDueList.filtered(items, scope: .all, employeeId: 2).count == 4)
+        #expect(PaymentDueList.defaultScope(items, employee: master) == .mine)
+        #expect(PaymentDueList.defaultScope([.visit(othersVisit)], employee: master) == .all, "nothing of theirs")
+        #expect(PaymentDueList.defaultScope(items, employee: admin) == .all)
+        #expect(PaymentDueList.offersScope(to: master))
+        #expect(!PaymentDueList.offersScope(to: admin))
+        #expect(!PaymentDueList.offersScope(to: nil))
+    }
+
+    @Test("The hub waits for both lists, then shows what loaded with the other one's failure")
+    func paymentDueLoadState() {
+        #expect(PaymentDueLoadState(receipts: (hasValue: true, failure: nil), visits: (hasValue: false, failure: nil)) == .loading)
+        #expect(PaymentDueLoadState(receipts: (hasValue: true, failure: nil), visits: (hasValue: true, failure: nil)) == .loaded(problem: nil))
+        #expect(
+            PaymentDueLoadState(receipts: (hasValue: true, failure: nil), visits: (hasValue: false, failure: "Нет сети"))
+                == .loaded(problem: "Нет сети"),
+            "open receipts still show when the visits did not load"
+        )
+        #expect(
+            PaymentDueLoadState(receipts: (hasValue: false, failure: "Ошибка"), visits: (hasValue: false, failure: "Нет сети"))
+                == .failed("Ошибка")
+        )
+    }
+
+    @Test("Card texts: the client, what is paid for, the time and master")
+    func paymentDueTexts() throws {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let visit = Self.appointment(deposit: 2_000)
+        let created = Fixtures.referenceDate
+
+        #expect(PaymentDueText.contents(.visit(visit)) == "Хеликс")
+        #expect(PaymentDueText.contents(.receipt(Self.receipt(items: [Self.helix, Self.spray]))) == "Хеликс, Спрей для ухода — 100 мл")
+        #expect(PaymentDueText.contents(.receipt(Self.receipt())) == "Пусто")
+        #expect(PaymentDueText.contents(.receipt(Self.receipt(appointment: visit))) == "Хеликс", "the visit's services until lines are saved")
+        #expect(PaymentDueText.names(["Лабрет", "Хеликс", "Мочка", "Спрей"]) == "Лабрет, Хеликс и ещё 2")
+
+        let time = DateText.timeRange(visit.startsAt, visit.endsAt)
+        #expect(PaymentDueText.when(.visit(visit)) == "\(time) · Анна")
+        #expect(
+            PaymentDueText.when(.receipt(Self.receipt(createdAt: created)), now: created, calendar: utc)
+                == "Без записи · открыл(а) Анна · \(DateText.time(created))"
+        )
+
+        #expect(PaymentDue.receipt(Self.receipt(client: Self.ivan)).clientName == "Иван Петров")
+        #expect(PaymentDue.receipt(Self.receipt(appointment: visit)).clientName == "Иван Петров", "the visit's client")
+        #expect(PaymentDue.receipt(Self.receipt()).clientName == "Без клиента")
     }
 
     @Test("«Удалить чек?» says what is lost and what stays")

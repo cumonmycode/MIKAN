@@ -9,7 +9,7 @@ import type { AppContext } from '../context.js';
 import type { DbOrTx } from '../db/client.js';
 import { aftercareTemplates, services } from '../db/schema.js';
 import { badRequest, conflict, errorMessage, notFound, upstreamError } from '../lib/errors.js';
-import { templateOut, type ServiceRow, type ServiceVariant } from '../lib/serialize.js';
+import { parseMasterPrices, parseVariants, templateOut, type ServiceRow, type ServiceVariant } from '../lib/serialize.js';
 import {
   defaultImageSubject,
   generateImage,
@@ -19,11 +19,14 @@ import {
 } from '../lib/service-images.js';
 import { idParams, money, nonNull, nullableText, parse, queryBool, requiredText } from '../lib/validation.js';
 import { resolveCategory, serviceScope } from '../domain/categories.js';
+import { DEFAULT_HEALING_CHECK_DAYS, HEALING_CHECK_DAYS_MAX, JEWELRY_CHANGE_WEEKS_MAX } from '../domain/follow-ups.js';
+import { masterPricesJson, pruneMasterVariants, type MasterPriceInput } from '../domain/service-prices.js';
 import { serializeService, serializeServices, setCompatibleJewelry, setConsumptionNorms } from '../domain/services.js';
 import { sniffImage } from './uploads.js';
 
 const MAX_PHOTOS = 12;
 const MAX_VARIANTS = 20;
+const MAX_MASTER_PRICES = 20;
 const MAX_DURATION_MIN = 24 * 60;
 /** Generation + download limit: a bit under the apps' 4-minute timeout, so they get a real error message. */
 const IMAGE_TIMEOUT_MS = 210_000;
@@ -42,6 +45,12 @@ const imageUrl = z
   .nullish()
   .transform((v) => (v === '' ? null : v));
 const variant = z.object({ name: requiredText(100), price: money, durationMin: durationMin.nullish() });
+const masterPrice = z.object({
+  employeeId: z.number().int().positive(),
+  price: money,
+  priceMax: money.nullish(),
+  variants: nonNull(z.array(z.object({ name: requiredText(100), price: money })).max(MAX_VARIANTS)),
+});
 
 /** Fields that are optional on create and behave the same on PATCH (absent = untouched). */
 const optionalServiceFields = {
@@ -53,9 +62,12 @@ const optionalServiceFields = {
   imagePrompt: nullableText(1000),
   photos: nonNull(z.array(imagePath).max(MAX_PHOTOS)),
   variants: nonNull(z.array(variant).max(MAX_VARIANTS)),
+  masterPrices: nonNull(z.array(masterPrice).max(MAX_MASTER_PRICES)),
   depositAmount: nonNull(money),
   aftercareTemplateId: z.number().int().positive().nullish(),
   freshProcedure: nonNull(z.boolean()),
+  healingCheckDays: z.number().int().min(1).max(HEALING_CHECK_DAYS_MAX).nullish(),
+  jewelryChangeWeeks: z.number().int().min(1).max(JEWELRY_CHANGE_WEEKS_MAX).nullish(),
   jewelryIds: nonNull(z.array(z.number().int().positive()).max(100)),
   consumables: nonNull(
     z.array(z.object({ productId: z.number().int().positive(), quantity: z.number().int().min(1).max(1000) })).max(50),
@@ -104,6 +116,25 @@ function variantsJson(list: Array<{ name: string; price: number; durationMin?: n
   return JSON.stringify(clean);
 }
 
+/**
+ * The masters' prices to store: sent ones are validated against the name and variants being saved; new variants alone
+ * drop the overrides of names that no longer exist; otherwise they stay.
+ */
+function masterPricesFor(
+  db: DbOrTx,
+  input: { masterPrices?: MasterPriceInput[]; variants?: unknown },
+  current: ServiceRow | null,
+  service: { name: string; variantsJson: string },
+): string {
+  const variants = parseVariants(service.variantsJson);
+  if (input.masterPrices) {
+    const stored = current ? parseMasterPrices(current.masterPricesJson) : [];
+    return masterPricesJson(db, input.masterPrices, { name: service.name, variants }, stored);
+  }
+  if (!current) return '[]';
+  return input.variants ? pruneMasterVariants(current.masterPricesJson, variants) : current.masterPricesJson;
+}
+
 function getService(db: DbOrTx, id: number): ServiceRow {
   const row = db.select().from(services).where(eq(services.id, id)).get();
   if (!row) throw notFound('Услуга не найдена');
@@ -147,6 +178,11 @@ export function catalogRoutes(app: FastifyInstance, ctx: AppContext): void {
     const input = parse(serviceCreate, request.body);
     assertTemplate(db, input.aftercareTemplateId);
     const pricing = resolvePricing(input.price, input.priceMax ?? null, input.priceFrom ?? false);
+    // Older builds do not send it: a service with its own memo template is taken as a fresh procedure.
+    const freshProcedure = input.freshProcedure ?? input.aftercareTemplateId != null;
+    // A fresh procedure asks «Как заживает?» a week after the visit unless staff chose otherwise.
+    const healingCheckDays = input.healingCheckDays !== undefined ? input.healingCheckDays : freshProcedure ? DEFAULT_HEALING_CHECK_DAYS : null;
+    const variants = variantsJson(input.variants ?? []);
     const now = Date.now();
     return db.transaction((tx) => {
       const row = tx
@@ -161,11 +197,13 @@ export function catalogRoutes(app: FastifyInstance, ctx: AppContext): void {
           imageUrl: input.imageUrl ?? null,
           imagePrompt: input.imagePrompt ?? null,
           photosJson: JSON.stringify(input.photos ?? []),
-          variantsJson: variantsJson(input.variants ?? []),
+          variantsJson: variants,
+          masterPricesJson: masterPricesFor(tx, input, null, { name: input.name, variantsJson: variants }),
           depositAmount: input.depositAmount ?? 0,
           aftercareTemplateId: input.aftercareTemplateId ?? null,
-          // Older builds do not send it: a service with its own memo template is taken as a fresh procedure.
-          freshProcedure: input.freshProcedure ?? input.aftercareTemplateId != null,
+          freshProcedure,
+          healingCheckDays,
+          jewelryChangeWeeks: input.jewelryChangeWeeks ?? null,
           active: input.active ?? true,
           sort: input.sort ?? 0,
           createdAt: now,
@@ -190,11 +228,13 @@ export function catalogRoutes(app: FastifyInstance, ctx: AppContext): void {
       input.priceFrom ?? current.priceFrom,
     );
     const category = input.category ?? current.category;
+    const name = input.name ?? current.name;
+    const variants = input.variants ? variantsJson(input.variants) : current.variantsJson;
     return db.transaction((tx) => {
       const row = tx
         .update(services)
         .set({
-          name: input.name ?? current.name,
+          name,
           category,
           // A service moved to another category takes its group name along.
           groupName: resolveCategory(tx, serviceScope(category), keep(input.group, current.groupName)),
@@ -204,10 +244,13 @@ export function catalogRoutes(app: FastifyInstance, ctx: AppContext): void {
           imageUrl: keep(input.imageUrl, current.imageUrl),
           imagePrompt: keep(input.imagePrompt, current.imagePrompt),
           photosJson: input.photos ? JSON.stringify(input.photos) : current.photosJson,
-          variantsJson: input.variants ? variantsJson(input.variants) : current.variantsJson,
+          variantsJson: variants,
+          masterPricesJson: masterPricesFor(tx, input, current, { name, variantsJson: variants }),
           depositAmount: input.depositAmount ?? current.depositAmount,
           aftercareTemplateId: keep(input.aftercareTemplateId, current.aftercareTemplateId),
           freshProcedure: input.freshProcedure ?? current.freshProcedure,
+          healingCheckDays: keep(input.healingCheckDays, current.healingCheckDays),
+          jewelryChangeWeeks: keep(input.jewelryChangeWeeks, current.jewelryChangeWeeks),
           active: input.active ?? current.active,
           sort: input.sort ?? current.sort,
           updatedAt: Date.now(),

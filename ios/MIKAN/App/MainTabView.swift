@@ -8,19 +8,24 @@ struct MainTabView: View {
         TabView(selection: $appState.selectedTab) {
             Tab("Запись", systemImage: "calendar", value: AppTab.schedule) {
                 ScheduleView()
+                    .offlineBanner()
             }
             Tab("Клиенты", systemImage: "person.2", value: AppTab.clients) {
                 ClientsListView()
+                    .offlineBanner()
             }
             Tab("Касса", systemImage: "rublesign.circle", value: AppTab.pos) {
                 POSView()
+                    .offlineBanner()
             }
             Tab("Склад", systemImage: "shippingbox", value: AppTab.inventory) {
                 InventoryView()
+                    .offlineBanner()
             }
             .badge(appState.badges.lowStock)
             Tab("Ещё", systemImage: "ellipsis.circle", value: AppTab.more) {
                 MoreView()
+                    .offlineBanner()
             }
             .badge(appState.moreBadge)
         }
@@ -28,6 +33,19 @@ struct MainTabView: View {
         .tabViewBottomAccessory {
             ShiftAccessoryView()
         }
+        // A tapped push notification: the appointment, the chat or the requests, over the current tab.
+        .sheet(item: $appState.pushRoute) { route in
+            PushRouteView(route: route)
+        }
+        // The cart's receipt turned out paid or deleted on another phone while it was not on screen.
+        .errorAlert(receiptGoneNotice, title: "Чек закрыт")
+    }
+
+    private var receiptGoneNotice: Binding<String?> {
+        Binding(
+            get: { appState.isReceiptOpen ? nil : appState.receipts.goneNotice },
+            set: { appState.receipts.goneNotice = $0 }
+        )
     }
 }
 

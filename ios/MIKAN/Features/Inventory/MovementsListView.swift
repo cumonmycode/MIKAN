@@ -4,6 +4,8 @@ import SwiftUI
 struct MovementsListView: View {
     @Environment(APIClient.self) private var api
     @State private var type: MovementType?
+    /// The filter on screen (`"all"` — no filter): cleared only for another one, not when the screen reappears.
+    @State private var shownTypeKey: String?
     @State private var movements = Remote<[StockMovement]>()
     @State private var total = 0
     @State private var isLoadingMore = false
@@ -13,7 +15,7 @@ struct MovementsListView: View {
     var body: some View {
         List {
             ForEach(movements.value ?? []) { movement in
-                MovementRow(movement: movement, showsProduct: true)
+                MovementLink(movement: movement, showsProduct: true)
                     .task { await loadMore(after: movement) }
             }
             if isLoadingMore {
@@ -31,7 +33,9 @@ struct MovementsListView: View {
         }
         .refreshable { await load() }
         .task(id: type) {
-            movements.reset()
+            let key = type?.rawValue ?? "all"
+            if shownTypeKey != key { movements.reset() }
+            shownTypeKey = key
             await load()
         }
         .remoteErrorAlert(movements)

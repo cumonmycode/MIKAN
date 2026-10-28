@@ -13,10 +13,10 @@ import {
 } from '../domain/receipts.js';
 import { idempotent } from '../lib/idempotency.js';
 import { idParams, money, nonNull, nullableText, parse } from '../lib/validation.js';
-import { saleItem } from './sales.js';
+import { saleLine } from './sales.js';
 
 const id = z.number().int().positive();
-const items = z.array(saleItem).max(100);
+const items = z.array(saleLine).max(100);
 const createBody = z.object({
   appointmentId: id.nullish(),
   clientId: id.nullish(),

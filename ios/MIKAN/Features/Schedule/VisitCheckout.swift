@@ -1,7 +1,7 @@
 import Foundation
 
-/// The POS action of an appointment card while it is unpaid: continue its open receipt, start the visit (the
-/// appointment moves to «Касса»), or take payment for a completed visit.
+/// The POS action of an appointment card while it is unpaid: continue its open receipt, start the visit (its receipt
+/// opens over the card), or take payment for a completed visit.
 nonisolated enum VisitCheckout: Equatable, Sendable {
     /// The visit has started: its receipt is open in the POS.
     case openReceipt
@@ -44,9 +44,9 @@ nonisolated enum VisitCheckout: Equatable, Sendable {
     var footer: String {
         switch self {
         case .openReceipt:
-            "Визит идёт — чек открыт в кассе."
+            "Визит идёт — чек открыт. В нём можно добавить украшения и принять оплату."
         case .startVisit:
-            "Запись перейдёт в кассу: откроется чек с услугами, клиентом и предоплатой. Украшения можно добавить по ходу визита."
+            "Откроется чек с услугами, клиентом и предоплатой: добавьте украшения и примите оплату здесь же."
         case .takePayment:
             "Откроется чек с услугами, клиентом и предоплатой."
         }

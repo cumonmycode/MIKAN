@@ -20,6 +20,11 @@ struct DraftServiceLine: Identifiable, Hashable {
     var category: ServiceCategory?
     /// Prepayment the catalog service asks for (`Service.depositAmount`); 0 for a custom line.
     var depositAmount: Int
+    /// Name of the booked variant, so the line can be re-priced for another master.
+    var variant: String?
+    /// The catalog price of the line for the master it was priced for: while `price` equals it, the line re-prices
+    /// with the master (see `AppointmentLinePricing.swift`). `nil` — a custom line, or one not matched with the catalog.
+    var autoPrice: Int?
 
     init(
         id: UUID = UUID(),
@@ -29,7 +34,9 @@ struct DraftServiceLine: Identifiable, Hashable {
         durationMin: Int?,
         isVariablePrice: Bool = false,
         category: ServiceCategory? = nil,
-        depositAmount: Int = 0
+        depositAmount: Int = 0,
+        variant: String? = nil,
+        autoPrice: Int? = nil
     ) {
         self.id = id
         self.serviceId = serviceId
@@ -39,18 +46,24 @@ struct DraftServiceLine: Identifiable, Hashable {
         self.isVariablePrice = isVariablePrice
         self.category = category
         self.depositAmount = max(0, depositAmount)
+        self.variant = variant
+        self.autoPrice = autoPrice
     }
 
-    /// A booked catalog service; a variant brings its own name, price and (optionally) duration.
-    init(service: Service, variant: ServiceVariant? = nil) {
+    /// A booked catalog service at the master's price (the catalog one while no master is chosen); a variant brings
+    /// its own name, price and (optionally) duration.
+    init(service: Service, variant: ServiceVariant? = nil, masterId: Int? = nil) {
+        let price = service.price(for: masterId, variant: variant)
         self.init(
             serviceId: service.id,
             name: service.lineName(variant: variant),
-            price: variant?.price ?? service.price,
+            price: price,
             durationMin: variant?.durationMin ?? service.durationMin,
-            isVariablePrice: variant == nil && service.hasVariablePrice,
+            isVariablePrice: variant == nil && service.hasVariablePrice(for: masterId),
             category: service.category,
-            depositAmount: service.depositAmount
+            depositAmount: service.depositAmount,
+            variant: variant?.name,
+            autoPrice: price
         )
     }
 
@@ -90,7 +103,10 @@ struct AppointmentDraft: Identifiable, Hashable {
     var appointmentId: Int?
     var client: ClientRef?
     var clientSuggestion: ClientSuggestion?
+    /// Changing it re-prices the untouched catalog lines (`repriceLines(from:)`).
     var masterId: Int?
+    /// The master of a saved appointment as loaded: its lines were priced for them.
+    private(set) var savedMasterId: Int?
     /// Any booking change drops the kept total and lets an automatic duration follow the services
     /// (prepayment amounts resolved from the catalog are not a booking change).
     var lines: [DraftServiceLine] = [] {
@@ -174,9 +190,11 @@ struct AppointmentDraft: Identifiable, Hashable {
 
     /// Loads a saved appointment as is: its duration follows the services only if it equals their sum,
     /// and a price or prepayment that differs from the services is kept. `catalog` resolves the lines'
-    /// prepayments (see `resolveDeposits(from:)` when it loads later).
+    /// prepayments and catalog prices (see `resolveCatalog(from:)` when it loads later).
     static func edit(_ appointment: Appointment, catalog: [Service] = []) -> AppointmentDraft {
-        let lines = lines(of: appointment).map { $0.resolvingDeposit(from: catalog) }
+        let lines = lines(of: appointment).map {
+            $0.resolvingDeposit(from: catalog).resolvingAutoPrice(from: catalog, masterId: appointment.master.id)
+        }
         let linesDuration = lines.reduce(0) { $0 + ($1.durationMin ?? 0) }
         let linesTotal = lines.reduce(0) { $0 + $1.price }
         let linesDeposit = lines.reduce(0) { $0 + $1.depositAmount }
@@ -184,6 +202,7 @@ struct AppointmentDraft: Identifiable, Hashable {
             appointmentId: appointment.id,
             client: appointment.client,
             masterId: appointment.master.id,
+            savedMasterId: appointment.master.id,
             lines: lines,
             start: appointment.startsAt,
             durationMin: max(durationStep, appointment.durationMin),
@@ -240,7 +259,7 @@ struct AppointmentDraft: Identifiable, Hashable {
     }
 
     mutating func add(service: Service, variant: ServiceVariant? = nil) {
-        append(DraftServiceLine(service: service, variant: variant))
+        append(DraftServiceLine(service: service, variant: variant, masterId: masterId))
     }
 
     /// Adds a free-form line; blank names are ignored.
@@ -264,7 +283,7 @@ struct AppointmentDraft: Identifiable, Hashable {
             add(service: service, variant: variant)
             return
         }
-        lines[index] = DraftServiceLine(service: service, variant: variant)
+        lines[index] = DraftServiceLine(service: service, variant: variant, masterId: masterId)
     }
 
     mutating func removeLines(serviceId: Int) {
@@ -292,6 +311,21 @@ struct AppointmentDraft: Identifiable, Hashable {
         if depositOverride == linesDeposit {
             depositOverride = nil
         }
+    }
+
+    /// Once the catalog is known: the prepayments and the catalog prices of the lines loaded from a saved
+    /// appointment (for its saved master), then the untouched lines take the current master's prices.
+    mutating func resolveCatalog(from catalog: [Service]) {
+        lines = lines.map { $0.resolvingAutoPrice(from: catalog, masterId: savedMasterId) }
+        resolveDeposits(from: catalog)
+        repriceLines(from: catalog)
+    }
+
+    /// The catalog lines nobody edited take the current master's prices (after the master changes, or when lines
+    /// were added before a master was chosen). The total and the duration follow as with any change of the services;
+    /// a hand-set price stays.
+    mutating func repriceLines(from catalog: [Service]) {
+        lines = lines.map { $0.repriced(for: masterId, catalog: catalog) }
     }
 
     private mutating func append(_ line: DraftServiceLine) {

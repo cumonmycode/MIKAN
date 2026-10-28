@@ -17,11 +17,15 @@ nonisolated struct Client: Codable, Hashable, Identifiable, Sendable {
     var telegramLinked: Bool
     var telegramUsername: String?
     var botEnabled: Bool
+    /// The client asked for no news and offers (campaigns, birthday, win-back); `nil` from a server without campaigns.
+    var marketingOptOut: Bool? = nil
     var archived: Bool
     let createdAt: Date
     var updatedAt: Date
     /// `nil` in lists, filled by `GET /clients/:id`.
     var stats: ClientStats?
+    /// Bonuses and the birthday discount; `nil` in lists and from a server without loyalty.
+    var loyalty: ClientLoyalty? = nil
 
     var ref: ClientRef { ClientRef(id: id, name: name, lastName: lastName, phone: phone, telegramLinked: telegramLinked) }
     /// "Иван Петров" — how the app names the client everywhere.

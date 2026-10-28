@@ -28,7 +28,7 @@ struct POSGoodsCatalogTests {
         #expect(POSCatalog.goods.productKind == .goods)
         #expect(POSCatalog.jewelry.productKind == .jewelry)
         #expect(POSCatalog.services.productKind == nil)
-        #expect(POSCatalog.goods.sectionTitle(isSearching: false) == "Добавить товар")
+        #expect(POSCatalog(rawValue: POSCatalog.goods.rawValue) == .goods, "the remembered segment reads back")
     }
 
     @Test("Each segment lists only its kind; search and the category work inside it")

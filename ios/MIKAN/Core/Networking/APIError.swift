@@ -17,6 +17,8 @@ nonisolated enum APIError: Error, Equatable, LocalizedError, Sendable {
     case transport(message: String, outcomeUnknown: Bool = false)
     case decoding
     case invalidServerAddress
+    /// A write refused before it was sent: the app is offline (`OfflineWriteGuard`), nothing reached the server.
+    case offline
 
     var message: String {
         switch self {
@@ -24,6 +26,7 @@ nonisolated enum APIError: Error, Equatable, LocalizedError, Sendable {
         case .transport(let message, _): message
         case .decoding: "Не удалось обработать ответ сервера. Возможно, приложение нужно обновить."
         case .invalidServerAddress: "Неверный адрес сервера. Пример: https://studio.example.ru"
+        case .offline: "Нужен интернет. Без сети данные можно только смотреть."
         }
     }
 

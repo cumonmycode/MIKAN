@@ -80,7 +80,7 @@ export function mastersSection(db: DbOrTx, s: PeriodSales, groups: AppointmentGr
   }
   for (const sale of s.kept) {
     if (sale.masterId == null) continue;
-    entry(sale.masterId).revenue += sale.total;
+    entry(sale.masterId).revenue += sale.keptRevenue;
     entry(sale.masterId).salesCount += 1;
   }
   const emps = employeesByIds(db, [...stats.keys()]);
@@ -104,12 +104,12 @@ export function clientsSection(db: DbOrTx, s: PeriodSales, from: number, to: num
   let anonymousSales = 0;
   for (const sale of s.kept) {
     if (sale.clientId == null) {
-      anonymousRevenue += sale.total;
+      anonymousRevenue += sale.keptRevenue;
       anonymousSales += 1;
       continue;
     }
     const e = spend.get(sale.clientId) ?? { revenue: 0, salesCount: 0 };
-    spend.set(sale.clientId, { revenue: e.revenue + sale.total, salesCount: e.salesCount + 1 });
+    spend.set(sale.clientId, { revenue: e.revenue + sale.keptRevenue, salesCount: e.salesCount + 1 });
   }
   const returning = returningClients(db, from, to);
   const split = { firstTime: { count: 0, revenue: 0 }, returning: { count: 0, revenue: 0 } };

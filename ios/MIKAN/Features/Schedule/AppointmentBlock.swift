@@ -1,7 +1,10 @@
 import SwiftUI
 
-/// Appointment in the time grid, tinted with the master's color.
+/// Appointment in the time grid, tinted with the master's color; an unsettled online booking gets a dashed outline.
 struct AppointmentBlock: View {
+    private static let cornerRadius: CGFloat = 6
+    private static let onlineOutline = StrokeStyle(lineWidth: 1.5, dash: [4, 3])
+
     let appointment: Appointment
     let compact: Bool
     let height: CGFloat
@@ -9,6 +12,7 @@ struct AppointmentBlock: View {
     private var color: Color { .master(appointment.master.color) }
     private var showsTitle: Bool { !compact && height >= 44 }
     private var depositMark: DepositMark? { DepositMark.of(appointment) }
+    private var onlineMark: OnlineMark? { OnlineMark.of(appointment) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -38,11 +42,17 @@ struct AppointmentBlock: View {
         .foregroundStyle(.primary)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(color.opacity(0.2))
-        .clipShape(.rect(cornerRadius: 6))
+        .clipShape(.rect(cornerRadius: Self.cornerRadius))
+        .overlay {
+            if let onlineMark {
+                RoundedRectangle(cornerRadius: Self.cornerRadius)
+                    .strokeBorder(onlineMark.color, style: Self.onlineOutline)
+            }
+        }
         .strikethrough(!appointment.isActive)
         .opacity(appointment.isActive ? 1 : 0.45)
         .dynamicTypeSize(...DynamicTypeSize.xLarge)
-        .contentShape(.rect(cornerRadius: 6))
+        .contentShape(.rect(cornerRadius: Self.cornerRadius))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(.isButton)
@@ -54,6 +64,13 @@ struct AppointmentBlock: View {
             Text(compact ? shortName : appointment.client.fullName)
                 .font(compact ? .caption2.weight(.semibold) : .caption.weight(.semibold))
                 .lineLimit(compact ? 2 : 1)
+            if showsTitle, let onlineMark {
+                Text(onlineMark.text)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(onlineMark.color)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
             if showsTitle {
                 Text(appointment.displayTitle)
                     .font(.caption2)
@@ -63,11 +80,15 @@ struct AppointmentBlock: View {
         }
     }
 
-    /// Start time with the prepayment glyph, the «в кассе» cart and the completion check.
+    /// Start time with the online-booking or prepayment glyph, the «в кассе» cart and the completion check.
     private var timeRow: some View {
         HStack(spacing: 3) {
             timeLabel
-            if let depositMark {
+            if let onlineMark {
+                Image(systemName: onlineMark.symbol)
+                    .font(.caption2)
+                    .foregroundStyle(onlineMark.color)
+            } else if let depositMark {
                 Image(systemName: depositMark.symbol)
                     .font(.caption2)
                     .foregroundStyle(depositMark.color)
@@ -111,6 +132,7 @@ struct AppointmentBlock: View {
             "мастер \(appointment.master.name)",
         ]
         if appointment.status != .scheduled { parts.append(appointment.status.title) }
+        if let onlineMark { parts.append("онлайн-запись, \(onlineMark.text.lowercased())") }
         if let depositMark { parts.append(depositMark.accessibilityText) }
         if appointment.isInPOS { parts.append("в кассе") }
         return parts.joined(separator: ", ")

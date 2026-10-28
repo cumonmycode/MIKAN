@@ -7,6 +7,7 @@ export const BUTTONS = {
   booking: '📅 Записаться',
   aftercare: '🩹 Уход после процедуры',
   contact: '📱 Поделиться номером',
+  cabinet: '👤 Мои записи и бонусы',
 } as const;
 
 /** Keyboard of a staff chat: quick questions to the staff-mode AI and the catalog. */
@@ -42,5 +43,6 @@ export function mainKeyboard(linked: boolean): Keyboard {
   return toGrammyKeyboard([
     [{ text: BUTTONS.services }, { text: BUTTONS.jewelry }],
     [{ text: BUTTONS.booking }, { text: BUTTONS.aftercare }],
+    [{ text: BUTTONS.cabinet }],
   ]);
 }

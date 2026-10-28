@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "10"
+    CURRENT_PROJECT_VERSION: "23"
     # Apple Developer Team used for automatic signing (TestFlight / App Store Connect).
     DEVELOPMENT_TEAM: G99YH9UK8C
     CODE_SIGN_STYLE: Automatic
@@ -35,6 +35,7 @@ targets:
         LSRequiresIPhoneOS: true
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        NSFaceIDUsageDescription: "MIKAN использует Face ID, чтобы открываться только вам: после запуска и если приложение было свёрнуто дольше 5 минут."
         NSPhotoLibraryUsageDescription: "MIKAN использует фото из медиатеки, чтобы добавлять снимки украшений, расходников и работ в каталог склада и услуг."
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -55,6 +56,15 @@ targets:
         SWIFT_STRICT_CONCURRENCY: complete
         ENABLE_PREVIEWS: YES
         CODE_SIGN_STYLE: Automatic
+      # Push Notifications: sandbox APNs for Debug builds, production for TestFlight / App Store.
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: MIKAN/Resources/MIKAN-Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: MIKAN/Resources/MIKAN-Release.entitlements
+          # Xcode 26: the multithreaded whole-module build produced an invalid LLVM module («Instruction does not
+          # dominate all uses») in its first output file and failed the archive; per-file optimization builds fine.
+          SWIFT_COMPILATION_MODE: singlefile
     scheme:
       testTargets:
         - MIKANTests

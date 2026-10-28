@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTestApp, make, type TestApp } from './helpers.js';
+import { createTestApp, make, openShift, type TestApp } from './helpers.js';
 
 const at = (iso: string) => vi.setSystemTime(Date.parse(iso));
 
@@ -9,6 +9,7 @@ describe('reports & dashboard', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     at('2026-10-13T06:00:00.000Z');
     t = await createTestApp();
+    await openShift(t);
   });
   afterEach(async () => {
     await t.close();
@@ -85,9 +86,18 @@ describe('reports & dashboard', () => {
 
     // Dashboard: "today" is the studio-local day (Oct 15).
     const dash = (await t.api('GET', '/api/dashboard')).json();
-    expect(dash).toMatchObject({ date: '2026-10-15', revenueToday: 3000, salesCountToday: 1, openShift: null });
+    // The shift opened to sell is still open.
+    expect(dash).toMatchObject({ date: '2026-10-15', revenueToday: 3000, salesCountToday: 1, openShift: { closedAt: null, openingCash: 0 } });
     expect(dash.appointments).toEqual([]);
-    expect(dash.badges).toEqual({ unreadChats: 0, needsAttention: 0, newBookingRequests: 0, lowStock: 0, smmReview: 0 });
+    expect(dash.badges).toEqual({
+      unreadChats: 0,
+      needsAttention: 0,
+      newBookingRequests: 0,
+      lowStock: 0,
+      onlineAwaiting: 0,
+      waitlist: 0,
+      smmReview: 0,
+    });
   });
 
   it('lists today’s non-cancelled appointments on the dashboard and counts low stock', async () => {

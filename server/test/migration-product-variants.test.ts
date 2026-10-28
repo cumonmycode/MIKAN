@@ -10,7 +10,8 @@ import * as schema from '../src/db/schema.js';
 import { serializeProduct } from '../src/domain/products.js';
 import { applyBankStatus } from '../src/domain/qr-payments.js';
 import { getSaleRow, serializeSale } from '../src/domain/refs.js';
-import { createSale, refundSale } from '../src/domain/sales.js';
+import { refundSale } from '../src/domain/refunds.js';
+import { createSale } from '../src/domain/sales.js';
 import { getProductRow, listMovements } from '../src/domain/stock.js';
 
 /** A copy of the migrations folder that stops before `0007_product_variants`. */

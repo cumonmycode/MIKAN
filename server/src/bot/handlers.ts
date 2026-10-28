@@ -2,6 +2,9 @@ import type { Bot, Context, Keyboard } from 'grammy';
 import type { AppContext } from '../context.js';
 import { errorMessage } from '../lib/errors.js';
 import { onSmmPrivate, onSmmVoice } from '../smm/tg-handlers.js';
+import { answerBirthdayQuestion, askBirthday } from './birthday.js';
+import { sendBookingOffer } from './booking-start.js';
+import { isCabinetStart, sendCabinetLink } from './cabinet.js';
 import { handleCallback } from './callbacks.js';
 import { jewelryCategoriesMenu, sendMenu, serviceSectionsMenu } from './catalog.js';
 import { BUTTONS, mainKeyboard, staffKeyboard } from './keyboards.js';
@@ -78,8 +81,13 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   const pm = bot.chatType('private');
 
   pm.command('start', async (c) => {
-    const reply = handleStart(ctx, sender(c), String(c.match ?? ''));
+    const payload = String(c.match ?? '');
+    const reply = handleStart(ctx, sender(c), payload);
     await c.reply(reply.text, { reply_markup: keyboardFor(reply) });
+    // `/start me` (the cabinet page's «get a link»): the sign-in buttons instead of the booking offer.
+    if (isCabinetStart(payload) && reply.linked && !reply.staff) await sendCabinetLink(ctx, c.chat.id);
+    else await sendBookingOffer(ctx, c.chat.id, reply);
+    if (reply.cardLinked) await askBirthday(ctx, c.chat.id);
   });
 
   pm.on('message:contact', async (c) => {
@@ -91,7 +99,16 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     );
     await c.reply(reply.text, { reply_markup: keyboardFor(reply) });
     // What the person asked before sharing the phone gets its answer now.
-    if (reply.linked || reply.staff) pipeline.answerPending(c.chat.id);
+    const pending = reply.linked || reply.staff ? pipeline.answerPending(c.chat.id) : null;
+    if (!reply.cardLinked) return;
+    // The birthday question comes last (after that answer, not awaited — updates are handled one by one), so a reply to
+    // the AI is never read as the birthday.
+    if (!pending) await askBirthday(ctx, c.chat.id);
+    else {
+      void pending
+        .then(() => askBirthday(ctx, c.chat.id))
+        .catch((err: unknown) => ctx.log.warn({ chatId: c.chat.id, err: errorMessage(err) }, 'birthday question failed'));
+    }
   });
 
   // Until a new chat shares its phone nothing else works: every message is answered with the request for the phone
@@ -117,6 +134,14 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   });
   pm.hears(BUTTONS.services, async (c) => {
     await openCatalog(deps, sender(c), BUTTONS.services, 'services');
+  });
+
+  // The client cabinet: the sign-in buttons without the AI (an unlinked chat was asked for the phone above).
+  pm.command('me', async (c) => {
+    await pipeline.receiveHandled(sender(c), c.message.text, () => sendCabinetLink(ctx, c.chat.id));
+  });
+  pm.hears(BUTTONS.cabinet, async (c) => {
+    await pipeline.receiveHandled(sender(c), BUTTONS.cabinet, () => sendCabinetLink(ctx, c.chat.id));
   });
 
   pm.on('callback_query:data', async (c) => {
@@ -177,6 +202,8 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   pm.on('message:text', async (c) => {
     // Staff: an awaited SMM remark or the link to a published post is handled there, not by the staff assistant.
     if (await onSmmPrivate(ctx, c.chat.id, c.message.text)) return;
+    // The answer to the birthday question (bot/birthday.ts); anything else goes to the AI as usual.
+    if (await answerBirthdayQuestion({ ctx, pipeline }, sender(c), c.message.text)) return;
     pipeline.receive(sender(c), c.message.text);
   });
 }

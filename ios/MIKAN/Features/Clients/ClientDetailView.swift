@@ -4,9 +4,13 @@ struct ClientDetailView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppState.self) private var appState
     @Environment(\.openURL) private var openURL
+    @Environment(\.permissions) private var permissions
+    @Environment(\.dismiss) private var dismiss
 
     let clientId: Int
     var onChange: ((Client) -> Void)?
+    /// «Объединить с…» done: the kept card and the cards that are gone (this one, when it was merged into another).
+    var onMerged: ((ClientMergeOutcome) -> Void)?
 
     @State private var client: Remote<Client>
     @State private var history = Remote<ClientHistory>()
@@ -17,10 +21,20 @@ struct ClientDetailView: View {
     @State private var confirmsArchive = false
     @State private var isWorking = false
     @State private var errorMessage: String?
+    @State private var showsMerge = false
+    /// «Продать»: the client's new receipt, shown over the card.
+    @State private var showsReceipt = false
+    @State private var mergedAway = false
 
-    init(clientId: Int, initial: Client? = nil, onChange: ((Client) -> Void)? = nil) {
+    init(
+        clientId: Int,
+        initial: Client? = nil,
+        onChange: ((Client) -> Void)? = nil,
+        onMerged: ((ClientMergeOutcome) -> Void)? = nil
+    ) {
         self.clientId = clientId
         self.onChange = onChange
+        self.onMerged = onMerged
         _client = State(initialValue: Remote(initial))
     }
 
@@ -30,8 +44,11 @@ struct ClientDetailView: View {
                 ClientHeaderSection(client: current)
                 actionsSection(current)
                 ClientStatsSection(stats: current.stats)
+                ClientLoyaltySection(client: current) { await load() }
                 infoSection(current)
+                ClientMarketingSection(client: current, errorMessage: $errorMessage) { apply($0) }
                 ClientHistorySection(history: history) { await loadHistory() }
+                AuditHistorySection(scope: .client(id: current.id))
             }
         }
         .listSectionSpacing(.compact)
@@ -49,6 +66,9 @@ struct ClientDetailView: View {
         .task { await load() }
         .remoteErrorAlert(client)
         .errorAlert($errorMessage)
+        .receiptFlow(isPresented: $showsReceipt) {
+            Task { await loadHistory() }
+        }
         .navigationDestination(isPresented: $showsChat) {
             if let current = client.value {
                 ClientChatView(client: current.ref)
@@ -61,6 +81,18 @@ struct ClientDetailView: View {
         }
         .sheet(isPresented: $showsTelegramLink) {
             TelegramLinkSheet(clientId: clientId, clientName: client.value?.name ?? "")
+        }
+        .sheet(isPresented: $showsMerge, onDismiss: { if mergedAway { dismiss() } }) {
+            if let current = client.value {
+                NavigationStack {
+                    ClientMergeSearchView(client: current) { finishMerge($0) }
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Отмена", role: .cancel) { showsMerge = false }
+                            }
+                        }
+                }
+            }
         }
         .sheet(item: $appointmentDraft) { draft in
             AppointmentEditorView(draft: draft) { _ in
@@ -88,6 +120,9 @@ struct ClientDetailView: View {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button("Изменить", systemImage: "pencil") { showsEditor = true }
+                if permissions.mergesClients {
+                    Button("Объединить с…", systemImage: "arrow.triangle.merge") { showsMerge = true }
+                }
                 Button(
                     client.value?.archived == true ? "Вернуть из архива" : "В архив",
                     systemImage: client.value?.archived == true ? "tray.and.arrow.up" : "archivebox",
@@ -158,8 +193,10 @@ struct ClientDetailView: View {
             if let instagram = current.instagram.nonEmpty {
                 LabeledContent("Instagram", value: "@\(instagram)")
             }
-            if let birthday = current.birthday, let date = CalendarDay.date(from: birthday) {
-                LabeledContent("Дата рождения", value: DateText.fullDate(date))
+            if let birthday = Birthday(current.birthday) {
+                LabeledContent("Дата рождения", value: birthday.text)
+            } else {
+                ClientBirthdayHint { showsEditor = true }
             }
             if let source = current.source.nonEmpty {
                 LabeledContent("Откуда узнал", value: ClientSource.title(for: source))
@@ -181,7 +218,9 @@ struct ClientDetailView: View {
     }
 
     private func apply(_ updated: Client) {
-        let merged = updated.stats == nil ? withStats(updated, from: client.value) : updated
+        var merged = updated.stats == nil ? withStats(updated, from: client.value) : updated
+        // An edit answers without the bonuses: keep the ones shown.
+        if merged.loyalty == nil { merged.loyalty = client.value?.loyalty }
         client.set(merged)
         onChange?(merged)
     }
@@ -192,13 +231,25 @@ struct ClientDetailView: View {
         return result
     }
 
-    /// «Продать»: a new open receipt for the client in «Касса».
+    /// After «Объединить с…»: this card shows the merged result, or — merged into another — the screen closes.
+    private func finishMerge(_ outcome: ClientMergeOutcome) {
+        mergedAway = outcome.removedIds.contains(clientId)
+        showsMerge = false
+        onMerged?(outcome)
+        guard !mergedAway else { return }
+        errorMessage = outcome.failure
+        apply(outcome.kept)
+        Task { await loadHistory() }
+    }
+
+    /// «Продать»: a new open receipt for the client, shown over the card.
     private func startSale(for client: ClientRef) {
         isWorking = true
         Task {
             defer { isWorking = false }
             do {
                 try await appState.startSale(for: client)
+                showsReceipt = true
             } catch {
                 errorMessage = error.userMessage
             }

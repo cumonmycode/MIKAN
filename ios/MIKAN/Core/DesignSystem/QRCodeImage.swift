@@ -5,6 +5,7 @@ import SwiftUI
 /// scaled without interpolation, quiet zone included).
 struct QRCodeImage: View {
     let payload: String
+    var accessibilityLabel = "QR-код для оплаты"
 
     var body: some View {
         if let image = Self.render(payload) {
@@ -12,7 +13,7 @@ struct QRCodeImage: View {
                 .interpolation(.none)
                 .resizable()
                 .scaledToFit()
-                .accessibilityLabel("QR-код для оплаты")
+                .accessibilityLabel(accessibilityLabel)
         } else {
             ContentUnavailableView("Не удалось построить QR-код", systemImage: "qrcode")
         }
@@ -20,12 +21,15 @@ struct QRCodeImage: View {
 
     private static let context = CIContext()
 
-    static func render(_ payload: String) -> CGImage? {
+    /// `moduleSize` — pixels per module: 1 for on-screen drawing (scaled without interpolation), more for a picture
+    /// to share or print.
+    static func render(_ payload: String, moduleSize: CGFloat = 1) -> CGImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(payload.utf8)
         filter.correctionLevel = "M"
         guard let output = filter.outputImage else { return nil }
-        return context.createCGImage(output, from: output.extent)
+        let scaled = moduleSize == 1 ? output : output.transformed(by: CGAffineTransform(scaleX: moduleSize, y: moduleSize))
+        return context.createCGImage(scaled, from: scaled.extent)
     }
 }
 

@@ -40,7 +40,7 @@ describe('GET /reports/analytics', () => {
   /**
    * Three studio days (13–15 Oct) and the three days before them: sales with a discount, sizes with their own and
    * the product's cost, a product without cost, refunds of this and of the previous period, appointments of every
-   * outcome, stock write-offs and consumables, two cash shifts and a prepayment.
+   * outcome, stock write-offs and consumables, cash shifts (selling needs one) and a prepayment.
    */
   async function seedStudio() {
     const anna = await make(t, '/api/employees', { name: 'Анна', login: 'anna', password: 'pass123', isMaster: true, color: '#00AA00' });
@@ -79,8 +79,13 @@ describe('GET /reports/analytics', () => {
     await make(t, '/api/appointments', {
       clientId: oleg.id, masterId: 1, startsAt: '2026-10-11T07:00:00Z', endsAt: '2026-10-11T08:00:00Z', status: 'completed',
     });
+    // A short shift for one sale: the takings leave with the collector, the drawer stays as it was.
+    at('2026-10-11T09:00:00.000Z');
+    await ok('POST', '/api/cash/shift/open', { openingCash: 1500 });
     at('2026-10-11T10:00:00.000Z');
     const piercing = await ok('POST', '/api/sales', { items: [{ type: 'service', name: 'Пирсинг', price: 800 }], discount: 0, payments: { cash: 800 } });
+    await ok('POST', '/api/cash/operations', { type: 'out', amount: 800, reason: 'Инкассация' });
+    await ok('POST', '/api/cash/shift/close', { closingCash: 1500 });
 
     // This period.
     at('2026-10-12T21:10:00.000Z');
@@ -117,6 +122,9 @@ describe('GET /reports/analytics', () => {
     // Expected: 1200 + 3780 − 800 (cash refund) + 500 − 2000 = 2680.
     await ok('POST', '/api/cash/shift/close', { closingCash: 2600 });
 
+    // The next shift opens with what the last one left and stays open.
+    at('2026-10-14T08:00:00.000Z');
+    await ok('POST', '/api/cash/shift/open', { openingCash: 2600 });
     at('2026-10-14T09:00:00.000Z');
     const consult = await ok('POST', '/api/sales', { items: [{ type: 'service', name: 'Консультация', price: 500 }], discount: 0, payments: { transfer: 500 } });
     at('2026-10-14T10:00:00.000Z');
@@ -162,7 +170,7 @@ describe('GET /reports/analytics', () => {
       averageCheck: 2920,
       discounts: 420,
       kept: 11_180,
-      payments: { cash: 6180, card: 0, transfer: 5500, qr: 0, deposit: 0 },
+      payments: { cash: 6180, card: 0, transfer: 5500, qr: 0, deposit: 0, bonus: 0, certificate: 0 },
     });
     expect(r.totals).toEqual({
       net: 10_380,

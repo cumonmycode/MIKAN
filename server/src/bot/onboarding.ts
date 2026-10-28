@@ -4,11 +4,14 @@ import type { DbOrTx } from '../db/client.js';
 import { employees } from '../db/schema.js';
 import { chatEmployee, findChat, getChat, setChatEmployee, storeMessage, upsertChat } from '../domain/bot-chats.js';
 import { createClient, findClientByChat, findClientByLinkToken, findClientByPhone, linkTelegram } from '../domain/clients.js';
+import { BOOKING_START_PREFIX } from '../domain/online-booking-links.js';
 import { getBotSettings, getStudioSettings } from '../domain/settings.js';
+import { WAITLIST_START_PREFIX, waitlistStartText } from '../domain/waitlist-messages.js';
 import { errorMessage } from '../lib/errors.js';
 import { isPlausiblePhone, normalizePhone } from '../lib/phone.js';
 import { clientFullName, type BotChatRow, type EmployeeRow } from '../lib/serialize.js';
 import { truncate } from '../lib/text.js';
+import { bookingStartText } from './booking-start.js';
 import { BUTTONS, STAFF_KEYBOARD } from './keyboards.js';
 import type { IncomingFrom } from './pipeline.js';
 import { bindStaffChat, notifyStaff } from './staff.js';
@@ -38,6 +41,8 @@ export interface OnboardingReply {
   linked: boolean;
   /** The chat belongs to a recognised employee: the staff keyboard is shown. */
   staff?: boolean;
+  /** The shared phone or `/start c<token>` linked the chat to a card just now (the bot may ask for the birthday). */
+  cardLinked?: boolean;
 }
 
 /** An active employee whose phone (normalized) is `phone`. */
@@ -63,17 +68,30 @@ export interface SharedContact {
   lastName: string | undefined;
 }
 
-/** `/start` (optionally with a `c<token>` deep-link payload from POST /clients/:id/telegram-link). */
+/**
+ * `/start` (optionally with a `c<token>` deep-link payload from POST /clients/:id/telegram-link, `b_<token>` from
+ * an online booking's page or `w_<id>` from the booking page after joining the waitlist).
+ */
 export function handleStart(ctx: AppContext, from: IncomingFrom, payload: string): OnboardingReply {
   const { db } = ctx;
   const greeting = getBotSettings(db).greeting;
   upsertChat(db, from.chatId, { telegramName: from.telegramName, username: from.username });
   let text = greeting;
+  let cardLinked = false;
   const token = payload.trim();
-  if (token.startsWith('c') && token.length > 1) {
+  const bookingLink = token.startsWith(BOOKING_START_PREFIX) && token.length > BOOKING_START_PREFIX.length;
+  const waitlistLink = token.startsWith(WAITLIST_START_PREFIX) && token.length > WAITLIST_START_PREFIX.length;
+  if (waitlistLink) {
+    text = waitlistStartText(db, from.chatId, token.slice(WAITLIST_START_PREFIX.length));
+  } else if (bookingLink) {
+    text =
+      bookingStartText(ctx, from, token.slice(BOOKING_START_PREFIX.length)) ??
+      `Не нашёл эту запись — возможно, ссылка устарела.\n\n${greeting}`;
+  } else if (token.startsWith('c') && token.length > 1) {
     const client = findClientByLinkToken(db, token.slice(1));
     if (client) {
       linkTelegram(db, client.id, from.chatId, from.username);
+      cardLinked = true;
       text =
         `${client.name}, ваш Telegram подключён к ${getStudioSettings(db).name} ✅\n` +
         'Сюда будут приходить напоминания о записях и рекомендации по уходу после процедур. ' +
@@ -83,12 +101,14 @@ export function handleStart(ctx: AppContext, from: IncomingFrom, payload: string
     }
   }
   const employee = chatEmployee(db, findChat(db, from.chatId));
-  if (employee && !(token.startsWith('c') && token.length > 1)) text = staffGreeting(getStudioSettings(db).name, employee);
+  if (employee && !bookingLink && !waitlistLink && !(token.startsWith('c') && token.length > 1)) {
+    text = staffGreeting(getStudioSettings(db).name, employee);
+  }
   const linked = findClientByChat(db, from.chatId) !== null;
   // Telegram never tells a bot the user's phone: ask for it, or employees go on chatting unrecognised, as clients.
   if (!linked && !employee) text = `${text}\n\n${SHARE_PHONE_HINT}`;
   storeMessage(db, from.chatId, 'system', text);
-  return { text, linked, ...(employee ? { staff: true } : {}) };
+  return { text, linked, ...(employee ? { staff: true } : {}), ...(cardLinked ? { cardLinked: true } : {}) };
 }
 
 /**
@@ -154,7 +174,7 @@ export async function handleContact(
     text = `Спасибо, ${name}! Номер сохранён ✅ Чем могу помочь?`;
   }
   storeMessage(db, from.chatId, 'system', text);
-  return { text, linked: true };
+  return { text, linked: true, cardLinked: true };
 }
 
 /**

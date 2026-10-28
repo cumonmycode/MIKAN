@@ -45,7 +45,8 @@ describe('service cards', () => {
       durationMin: 45, description: 'Nipple', imageUrl: '/uploads/cover.jpg', imagePrompt: 'a schematic male chest',
       photos: ['/uploads/1.jpg', 'https://cdn.example/2.jpg'],
       variants: [{ name: 'Один', price: 2500, durationMin: null }, { name: 'Два', price: 4000, durationMin: 60 }],
-      depositAmount: 0, aftercareTemplateId: null, freshProcedure: false, jewelryIds: [], consumables: [], active: true, sort: 0,
+      depositAmount: 0, masterPrices: [], aftercareTemplateId: null, freshProcedure: false, healingCheckDays: null, jewelryChangeWeeks: null,
+      jewelryIds: [], consumables: [], active: true, sort: 0,
     });
     const listed = (await t.api('GET', '/api/services')).json().items.find((s: { id: number }) => s.id === created.id);
     expect(listed).toEqual(created);

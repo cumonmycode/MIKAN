@@ -4,6 +4,7 @@ import SwiftUI
 struct ChatView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppState.self) private var appState
+    @Environment(\.permissions) private var permissions
 
     @State private var chat: BotChat
     var onChange: ((BotChat) -> Void)?
@@ -118,7 +119,7 @@ struct ChatView: View {
             .disabled(isTogglingAI)
             .accessibilityHint(chat.aiPaused ? "Включить ответы ИИ" : "Поставить ИИ на паузу")
         }
-        if StaffBinding.canBind(chat) {
+        if StaffBinding.canBind(chat), permissions.editsSettings {
             ToolbarSpacer(.fixed, placement: .topBarTrailing)
             ToolbarItem(placement: .topBarTrailing) {
                 StaffBindingMenu(chat: chat, onBound: employeeBound)

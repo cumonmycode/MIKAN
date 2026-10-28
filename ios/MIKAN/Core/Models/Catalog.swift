@@ -58,7 +58,21 @@ nonisolated struct CatalogCategory: Codable, Hashable, Identifiable, Sendable {
     var itemCount: Int
 }
 
+/// Where categories live: a warehouse section and, in «Услуги», one service category.
+nonisolated struct CategoryScope: Hashable, Sendable {
+    let section: CatalogSection
+    var serviceCategory: ServiceCategory? = nil
+}
+
 nonisolated extension Array where Element == CatalogCategory {
+    /// The registered category of the scope with this name (trimmed, case- and «ё»-insensitive).
+    func named(_ name: String, in scope: CategoryScope) -> CatalogCategory? {
+        let key = InventoryFilter.normalized(name)
+        guard !key.isEmpty else { return nil }
+        return self.scope(scope.section, serviceCategory: scope.serviceCategory)
+            .first { InventoryFilter.normalized($0.name) == key }
+    }
+
     /// Categories of one section (and service category), in staff order.
     func scope(_ section: CatalogSection, serviceCategory: ServiceCategory? = nil) -> [CatalogCategory] {
         filter { $0.section == section && $0.serviceCategory == serviceCategory }.sorted { $0.position < $1.position }

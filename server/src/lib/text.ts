@@ -66,3 +66,11 @@ export function formatServicePrice(price: number, priceMax: number | null, price
   if (priceFrom) return `от ${formatRub(price)}`;
   return price === 0 ? 'Бесплатно' : formatRub(price);
 }
+
+/** The Russian word form for a count: 1 день, 3 дня, 5 дней, 11 дней, 21 день. */
+export function pluralWord(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+}

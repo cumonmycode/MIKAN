@@ -31,6 +31,10 @@ describe('settings, catalog, knowledge and uploads', () => {
     expect((await t.api('GET', '/api/settings/studio')).json()).toEqual({
       name: 'MIKAN STUDIO', address: '', phone: '', workingHours: 'Ежедневно 11:00–21:00',
       instagram: '', website: '', about: '', timezone: 'Europe/Moscow', workdayStart: '11:00', workdayEnd: '21:00',
+      cancellation: { freeHours: 24, lateRetainPercent: 100, noShowRetainPercent: 100, autoRetain: false },
+      reviewLinks: { yandex: '', twogis: '', google: '' },
+      onlineBooking: { enabled: true, leadMinutes: 120, horizonDays: 60, holdMinutes: 15, stepMinutes: 30, note: '', confirmationHours: 24 },
+      pos: { sendReceipt: true },
     });
     const put = await t.api('PUT', '/api/settings/studio', { name: 'MIKAN', address: 'ул. Ленина, 1', about: null, timezone: 'Asia/Novosibirsk' });
     expect(put.json()).toMatchObject({ name: 'MIKAN', address: 'ул. Ленина, 1', about: '', timezone: 'Asia/Novosibirsk', workingHours: 'Ежедневно 11:00–21:00' });
@@ -63,7 +67,7 @@ describe('settings, catalog, knowledge and uploads', () => {
     const first = await make(t, '/api/services', { name: 'Я-первая', category: 'other', price: 0, durationMin: 15, sort: 0, description: 'Консультация' });
     expect(first).toEqual({
       id: first.id, name: 'Я-первая', category: 'other', group: null, price: 0, priceMax: null, priceFrom: false, durationMin: 15,
-      description: 'Консультация', imageUrl: null, imagePrompt: null, photos: [], variants: [], depositAmount: 0, aftercareTemplateId: null, freshProcedure: false, jewelryIds: [], consumables: [], active: true, sort: 0,
+      description: 'Консультация', imageUrl: null, imagePrompt: null, photos: [], variants: [], depositAmount: 0, masterPrices: [], aftercareTemplateId: null, freshProcedure: false, healingCheckDays: null, jewelryChangeWeeks: null, jewelryIds: [], consumables: [], active: true, sort: 0,
     });
     const names = async (q = '') => (await t.api('GET', `/api/services${q}`)).json().items.map((s: { name: string }) => s.name);
     expect(await names()).toEqual(['Я-первая', 'А-услуга', 'Б-услуга']);

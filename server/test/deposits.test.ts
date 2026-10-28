@@ -170,6 +170,7 @@ describe('prepayments (deposits)', () => {
     });
 
     it('refuses clients that predate prepayments, more than is held, and a prepayment without an appointment', async () => {
+      await openShift();
       const a = await book();
       await ok(`/api/appointments/${a.id}/deposit`, { amount: 2000, method: 'transfer' });
       const legacy = await post('/api/sales', {
@@ -193,6 +194,7 @@ describe('prepayments (deposits)', () => {
     });
 
     it('keeps the rest of a prepayment larger than the bill for the appointment', async () => {
+      await openShift();
       const a = await book({ depositRequired: 3000 });
       await ok(`/api/appointments/${a.id}/deposit`, { amount: 3000, method: 'transfer' });
       expect((await sell(a.id, { deposit: 2500 }, 2500)).statusCode).toBe(200);
@@ -476,6 +478,7 @@ describe('prepayments (deposits)', () => {
     });
 
     it('flags a payment that arrives after checkout; a code cancelled by completing the appointment is fine', async () => {
+      await openShift();
       const paidLater = await book();
       const late = await ok(`/api/appointments/${paidLater.id}/deposit/qr`, { delivery: 'link' });
       expect((await sell(paidLater.id, { cash: 8000, deposit: 0 })).statusCode).toBe(200);
@@ -525,6 +528,7 @@ describe('prepayments (deposits)', () => {
 
   describe('reports and the bot', () => {
     it('keeps held(start) + received − applied − refunded − retained = held(end)', async () => {
+      await openShift();
       const a = await book();
       const b = await book({ startsAt: '2026-10-18T11:00:00.000Z' });
       await ok(`/api/appointments/${a.id}/deposit`, { amount: 2000, method: 'transfer' });

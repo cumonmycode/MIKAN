@@ -1,96 +1,93 @@
 import SwiftUI
 
-/// «Чек»: the appointment or client it is for, editable lines, the jewelry / service / goods catalog, «Услуга»
-/// and «Оплатить · N ₽»; «Удалить чек» in the menu. Every change is saved to the open receipt on the server.
-/// Checkout itself is the `CheckoutView` sheet on the POS root (bound to `cart.isCheckoutPresented`).
+/// «Чек» — the receipt and its checkout on one screen: who it is for, the lines with the add buttons, the totals, the
+/// payment method, the visit's completion, and «Провести · N ₽» at the bottom. Every change is saved to the open
+/// receipt on the server. Lives in `ReceiptFlowView`.
 struct ReceiptView: View {
     @Environment(AppState.self) private var appState
     @Environment(APIClient.self) private var api
     @Environment(CartStore.self) private var cart
-    @Environment(OpenReceiptsStore.self) private var receipts
     @Environment(ReferenceStore.self) private var reference
-    /// Jewelry and goods; owned by the POS hub, so the catalog stays loaded between receipts.
-    let catalog: Remote<[Product]>
+    @Environment(ShiftStore.self) private var shift
 
-    @State private var catalogKind = POSCatalog.jewelry
-    /// Load state of the service catalog; the services themselves live in `ReferenceStore`.
-    @State private var serviceCatalog = Remote<Void>()
-    @State private var hint: CatalogHint?
-    @State private var search = ""
-    /// The category chip chosen in each product segment.
-    @State private var categories: [ProductKind: String] = [:]
-    @State private var showsServiceSheet = false
-    /// A product with several sizes whose size is being picked.
-    @State private var sizePickerProduct: Product?
-    @State private var addCount = 0
+    let checkout: ReceiptCheckout
+    /// Jewelry and goods for the catalog; owned by the flow, so it stays loaded between receipts.
+    let catalog: Remote<[Product]>
+    let onClose: () -> Void
+
+    /// The catalog segment last used, kept across receipts and launches.
+    @AppStorage(POSCatalog.storageKey) private var segment = POSCatalog.jewelry
+    @State private var sheet: ReceiptSheet?
+    @State private var picksClient = false
     @State private var deletion: ReceiptDeletion?
     @State private var isDeleting = false
     @State private var deleteError: String?
 
-    private static let gridColumns = 2
-    private static let tileSpacing: CGFloat = 12
-
-    private var isSearching: Bool { !search.trimmed.isEmpty }
-    private var products: [Product] { catalog.value ?? [] }
-
-    private func categoryNames(_ kind: ProductKind) -> [String] {
-        ProductCatalogFilter.categories(of: products, kind: kind, registry: reference.categories)
-    }
-
-    private func filtered(_ kind: ProductKind) -> [Product] {
-        ProductCatalogFilter.apply(products, kind: kind, query: search, category: categories[kind])
-    }
-
-    private func categoryBinding(_ kind: ProductKind) -> Binding<String?> {
-        Binding(get: { categories[kind] }, set: { categories[kind] = $0 })
+    /// Whose prices catalog services take: the visit's master, else whoever opened the receipt when a master.
+    private var masterId: Int? {
+        ReceiptPricing.masterId(
+            appointmentMasterId: cart.appointment?.master.id,
+            openedBy: cart.openedBy?.id,
+            masterIds: ReceiptPricing.masterIds(employees: reference.employees, signedIn: appState.employee)
+        )
     }
 
     var body: some View {
         List {
-            if !isSearching {
-                ReceiptHeaderSection()
-                ReceiptLinesSection()
+            ReceiptHeaderSection { picksClient = true }
+            ReceiptLinesSection(onEdit: edit, onAdd: add)
+            if !cart.isEmpty {
+                ReceiptTotalsSection(onDiscount: { sheet = .discount }, onCertificate: { sheet = .certificateLookup(code: $0) })
+                ReceiptPaymentSection()
+                ReceiptVisitSection()
             }
-            catalogSection
         }
+        // Nothing changes while the sale is on its way: it was built from the cart as it was.
+        .disabled(checkout.isSubmitting)
+        .listSectionSpacing(.compact)
         .auraBackground()
         .scrollDismissesKeyboard(.interactively)
-        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .automatic), prompt: catalogKind.searchPrompt)
-        .catalogHint($hint)
         .safeAreaBar(edge: .bottom) {
-            CartBar { showsServiceSheet = true }
+            ReceiptSubmitBar(checkout: checkout) { sheet = .openShift }
         }
-        .refreshable {
-            await loadCatalog()
-            if catalogKind == .services { await loadServices(force: true) }
-        }
-        .task { await loadCatalog() }
-        // Picks up edits made on another phone; a receipt paid or deleted there is let go.
-        .task { await receipts.syncCart() }
-        // Only orders the category chips; without it they are alphabetical.
-        .task { try? await reference.ensureCategories() }
-        .task(id: catalogKind) {
-            if catalogKind == .services, serviceCatalog.value == nil { await loadServices() }
-        }
-        .remoteErrorAlert(catalog)
+        .loadsCheckoutLoyalty()
         .navigationTitle("Чек")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { menu }
+        .toolbar { toolbarContent }
+        .navigationDestination(isPresented: $picksClient) {
+            ClientPickerView(selection: Binding(get: { cart.client }, set: { cart.client = $0 }))
+        }
+        .sheet(item: $sheet) { sheet in
+            content(for: sheet)
+        }
         .receiptDeletionDialog($deletion, onDelete: delete)
         .errorAlert($deleteError, title: "Чек не удалён")
-        .sheet(isPresented: $showsServiceSheet) {
-            AddServiceSheet { text in showHint(text) }
+        // While the QR code is up its sheet shows the errors.
+        .errorAlert(
+            Binding(get: { checkout.qrPayment == nil ? checkout.errorMessage : nil }, set: { checkout.errorMessage = $0 }),
+            title: checkout.errorTitle
+        )
+        .retryAlert(
+            Binding(get: { checkout.retryMessage }, set: { checkout.retryMessage = $0 }),
+            title: "Продажа могла пройти",
+            retry: checkout.submit
+        )
+        // The catalog sheet refreshes it each time it opens; here it only gets ready.
+        .task { if catalog.value == nil { await loadCatalog() } }
+        .task { await loadReference() }
+        .onChange(of: cart.receiptId) { _, id in
+            // Paid or deleted elsewhere: the sheets go, so the notice can show.
+            if id == nil { sheet = nil }
         }
-        .sheet(item: $sizePickerProduct) { picked in
-            // The latest copy after a catalog refresh, so the stock of every size is current.
-            let product = products.first { $0.id == picked.id } ?? picked
-            SizePickerSheet(product: product) { variant in add(product, variant: variant) }
-        }
-        .sensoryFeedback(.impact(weight: .light), trigger: addCount)
     }
 
     @ToolbarContentBuilder
-    private var menu: some ToolbarContent {
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Закрыть", systemImage: "xmark", role: .close, action: onClose)
+                .disabled(checkout.isSubmitting)
+                .accessibilityHint("Чек сохранится и останется в «К оплате»")
+        }
         if let receiptId = cart.receiptId {
             ToolbarItem(placement: .topBarTrailing) {
                 if isDeleting {
@@ -106,121 +103,60 @@ struct ReceiptView: View {
                     } label: {
                         Label("Действия с чеком", systemImage: "ellipsis")
                     }
+                    .disabled(checkout.isSubmitting)
                 }
-            }
-        }
-    }
-
-    private var catalogSection: some View {
-        Section {
-            catalogPicker
-            switch catalogKind {
-            case .jewelry, .goods:
-                if let kind = catalogKind.productKind {
-                    let names = categoryNames(kind)
-                    if !names.isEmpty {
-                        CategoryChips(categories: names, selection: categoryBinding(kind))
-                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
-                    catalogContent(kind)
-                }
-            case .services:
-                POSServiceCatalogSection(
-                    state: serviceCatalog,
-                    search: search,
-                    columns: Self.gridColumns,
-                    spacing: Self.tileSpacing,
-                    load: { await loadServices() }
-                ) { text in
-                    addCount += 1
-                    showHint(text)
-                }
-            }
-        } header: {
-            Text(catalogKind.sectionTitle(isSearching: isSearching))
-        }
-    }
-
-    private var catalogPicker: some View {
-        Picker("Каталог", selection: $catalogKind) {
-            ForEach(POSCatalog.allCases) { kind in
-                Text(kind.title).tag(kind)
-            }
-        }
-        .pickerStyle(.segmented)
-        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-        // Refresh failures of the service catalog while stale services stay on screen.
-        .remoteErrorAlert(serviceCatalog)
-    }
-
-    @ViewBuilder
-    private func catalogContent(_ kind: ProductKind) -> some View {
-        if catalog.value != nil {
-            let items = filtered(kind)
-            if items.isEmpty {
-                emptyState(kind)
-                    .listRowBackground(Color.clear)
-            } else {
-                ForEach(ProductCatalogFilter.rows(items, columns: Self.gridColumns), id: \.self) { row in
-                    tileRow(row)
-                        .listRowInsets(EdgeInsets(top: Self.tileSpacing / 2, leading: 0, bottom: Self.tileSpacing / 2, trailing: 0))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-            }
-        } else if let failure = catalog.failure {
-            ErrorStateView(message: failure, retry: loadCatalog)
-                .listRowBackground(Color.clear)
-        } else {
-            ProgressView()
-                .frame(maxWidth: .infinity, minHeight: 160)
-                .listRowBackground(Color.clear)
-        }
-    }
-
-    private func tileRow(_ row: [Product]) -> some View {
-        HStack(alignment: .top, spacing: Self.tileSpacing) {
-            ForEach(row) { product in
-                ProductTile(product: product, inCart: cart.quantity(ofProduct: product.id)) {
-                    select(product)
-                }
-                .frame(maxWidth: .infinity)
-            }
-            ForEach(row.count..<Self.gridColumns, id: \.self) { _ in
-                Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
             }
         }
     }
 
     @ViewBuilder
-    private func emptyState(_ kind: ProductKind) -> some View {
-        let symbol = CatalogSection(kind: kind).symbol
-        if isSearching {
-            ContentUnavailableView.search(text: search)
-        } else if categories[kind] != nil, !segmentProducts(kind).isEmpty {
-            ContentUnavailableView("В этой категории пусто", systemImage: symbol)
-        } else if kind == .goods {
-            ContentUnavailableView(
-                "Нет товаров",
-                systemImage: symbol,
-                description: Text("Добавьте товары — спреи для ухода, сертификаты — на вкладке «Склад» → «Товары». Они появятся здесь.")
-            )
-        } else {
-            ContentUnavailableView(
-                "Нет украшений",
-                systemImage: symbol,
-                description: Text("Добавьте украшения на вкладке «Склад» — они появятся здесь. Услугу можно добавить кнопкой «Услуга».")
-            )
+    private func content(for sheet: ReceiptSheet) -> some View {
+        switch sheet {
+        case .catalog:
+            CatalogSheet(segment: $segment, catalog: catalog, masterId: masterId, reload: loadCatalog)
+        case .line(let line):
+            ReceiptLineSheet(initial: line)
+        case .discount:
+            ReceiptDiscountSheet()
+        case .certificateSale:
+            CertificateSaleSheet()
+        case .certificateLookup(let code):
+            CertificateLookupSheet(initialCode: code ?? "")
+        case .openShift:
+            OpenShiftSheet()
         }
     }
 
-    private func segmentProducts(_ kind: ProductKind) -> [Product] {
-        ProductCatalogFilter.products(products, kind: kind)
+    // MARK: Actions
+
+    private func edit(_ id: CartLine.ID) {
+        guard let line = cart.lines.first(where: { $0.id == id }) else { return }
+        sheet = .line(line)
     }
+
+    private func add(_ addition: ReceiptAddition) {
+        guard let catalog = addition.catalog else {
+            sheet = .certificateSale
+            return
+        }
+        segment = catalog
+        sheet = .catalog
+    }
+
+    /// Nothing is sold or returned; the flow closes once the cart lets the receipt go.
+    private func delete(_ deletion: ReceiptDeletion) {
+        isDeleting = true
+        Task {
+            defer { isDeleting = false }
+            do {
+                try await appState.deleteReceipt(id: deletion.id, hasAppointment: deletion.hasAppointment)
+            } catch {
+                deleteError = error.userMessage
+            }
+        }
+    }
+
+    // MARK: Loading
 
     /// Jewelry and goods in one go: both segments come from the same catalog.
     private func loadCatalog() async {
@@ -231,41 +167,41 @@ struct ReceiptView: View {
         }
     }
 
-    private func loadServices(force: Bool = false) async {
-        await serviceCatalog.load { try await reference.ensureServices(force: force) }
+    /// Whether QR payments are on, the services (aftercare memo, catalog), who is a master (prices), category order
+    /// and the shift. Each one failing only hides what it adds; the server checks everything again.
+    private func loadReference() async {
+        async let qr: Void = loadQrConfig()
+        async let services: Void? = try? reference.ensureServices()
+        async let employees: Void? = try? reference.ensureEmployees()
+        async let categories: Void? = try? reference.ensureCategories()
+        if !shift.hasLoaded { await shift.refresh() }
+        _ = await (qr, services, employees, categories)
     }
 
-    /// One size goes straight to the receipt; several sizes ask which one first.
-    private func select(_ product: Product) {
-        if product.hasSeveralSizes {
-            sizePickerProduct = product
-        } else if cart.add(product: product) {
-            addCount += 1
-        }
+    private func loadQrConfig() async {
+        try? await reference.ensureQrPaymentsConfig()
+        cart.dropQrIfUnavailable(qrEnabled: reference.qrPaymentsEnabled)
     }
+}
 
-    private func add(_ product: Product, variant: ProductVariant) {
-        guard cart.add(product: product, variant: variant) else { return }
-        addCount += 1
-        showHint(SizePicking.addedHint(product: product, variant: variant))
-    }
+/// The sheets over the receipt, one at a time.
+enum ReceiptSheet: Identifiable {
+    case catalog
+    case line(CartLine)
+    case discount
+    case certificateSale
+    /// `code` — a certificate already paying the receipt, to change its amount.
+    case certificateLookup(code: String?)
+    case openShift
 
-    private func showHint(_ text: String?) {
-        guard let text else { return }
-        hint = CatalogHint(text: text)
-    }
-
-    /// Nothing is sold or returned; back to the hub once the server deleted it.
-    private func delete(_ deletion: ReceiptDeletion) {
-        isDeleting = true
-        Task {
-            defer { isDeleting = false }
-            do {
-                try await appState.deleteReceipt(id: deletion.id, hasAppointment: deletion.hasAppointment)
-                appState.closeReceipt()
-            } catch {
-                deleteError = error.userMessage
-            }
+    var id: String {
+        switch self {
+        case .catalog: "catalog"
+        case .line(let line): "line-\(line.id)"
+        case .discount: "discount"
+        case .certificateSale: "certificate-sale"
+        case .certificateLookup(let code): "certificate-lookup-\(code ?? "")"
+        case .openShift: "open-shift"
         }
     }
 }
@@ -277,15 +213,20 @@ struct ReceiptView: View {
     state.cart.add(product: PreviewData.labret, variant: PreviewData.labret.variants[1])
     state.cart.add(product: PreviewData.ring)
     return NavigationStack {
-        ReceiptView(catalog: Remote(PreviewData.products.filter(\.kind.isSold) + [PreviewData.aftercareSpray]))
+        ReceiptView(
+            checkout: ReceiptCheckout(state: state),
+            catalog: Remote(PreviewData.products.filter(\.kind.isSold) + [PreviewData.aftercareSpray]),
+            onClose: {}
+        )
     }
     .appEnvironment(state)
 }
 
 #Preview("Без записи") {
-    NavigationStack {
-        ReceiptView(catalog: Remote(PreviewData.products.filter(\.kind.isSold) + [PreviewData.aftercareSpray]))
+    let state = PreviewData.appState()
+    return NavigationStack {
+        ReceiptView(checkout: ReceiptCheckout(state: state), catalog: Remote(PreviewData.products), onClose: {})
     }
-    .previewEnvironment()
+    .appEnvironment(state)
 }
 #endif

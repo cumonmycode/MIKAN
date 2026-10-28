@@ -26,20 +26,24 @@ nonisolated struct ReportAnalytics: Decodable, Sendable {
     var masters: [AnalyticsMaster] = []
     var clients = AnalyticsClients()
     var appointments = AnalyticsAppointments()
+    /// Bonuses and gift certificates; zero from a server without loyalty.
+    var loyalty = AnalyticsLoyalty.zero
 
-    /// Nothing happened in the period: no sales, refunds, appointments, stock or cash movements, prepayments.
+    /// Nothing happened in the period: no sales, refunds, appointments, stock or cash movements, prepayments,
+    /// bonus or certificate operations.
     var isEmpty: Bool {
-        revenue.gross == 0 && revenue.refunds == 0 && appointments.total == 0 && stock.expenses == 0
-            && stock.writeoffs.quantity == 0 && stock.usage.quantity == 0 && stock.purchases.count == 0
-            && cash.operationsCount == 0 && cash.shiftsClosed == 0 && deposits.received == 0
-            && deposits.applied == 0 && deposits.refunded == 0 && deposits.retained == 0
+        revenue.gross == 0 && revenue.refunds == 0 && revenue.salesCount == 0 && appointments.total == 0
+            && stock.expenses == 0 && stock.writeoffs.quantity == 0 && stock.usage.quantity == 0
+            && stock.purchases.count == 0 && cash.operationsCount == 0 && cash.shiftsClosed == 0
+            && deposits.received == 0 && deposits.applied == 0 && deposits.refunded == 0 && deposits.retained == 0
+            && !loyalty.hasActivity
     }
 }
 
 nonisolated extension ReportAnalytics {
     private enum CodingKeys: String, CodingKey {
         case from, to, previousFrom, previousTo, timezone, totals, previous, revenue, byDay, byWeekday, byHour
-        case services, products, stock, deposits, cash, masters, clients, appointments
+        case services, products, stock, deposits, cash, masters, clients, appointments, loyalty
     }
 
     /// Sections a server does not send decode as empty, so the screen still shows the rest.
@@ -65,6 +69,7 @@ nonisolated extension ReportAnalytics {
         masters = try c.decode(.masters, or: [])
         clients = try c.decode(.clients, or: AnalyticsClients())
         appointments = try c.decode(.appointments, or: AnalyticsAppointments())
+        loyalty = try c.decode(.loyalty, or: .zero)
     }
 }
 

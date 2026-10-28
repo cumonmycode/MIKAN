@@ -14,6 +14,10 @@
 //
 //  2) SMM files for Meta's servers (Instagram takes a picture or video by URL when publishing):
 //       GET|HEAD /media/smm-<file> → https://<ORIGIN_HOST>/uploads/smm-<file>. Only SMM files of our server.
+//
+// The cron trigger additionally checks the MIKAN server from outside (see uptime.js).
+
+import { runUptimeCheck } from "./uptime.js";
 
 const TELEGRAM_ORIGIN = "https://api.telegram.org";
 const BOT_PATH = /^\/(?:file\/)?bot(\d+):[A-Za-z0-9_-]+\//;
@@ -90,5 +94,9 @@ export default {
 
     const target = new URL(url.pathname + url.search, TELEGRAM_ORIGIN);
     return fetch(new Request(target, request));
+  },
+
+  async scheduled(controller, env) {
+    await runUptimeCheck(env, controller.scheduledTime);
   },
 };

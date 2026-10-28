@@ -31,14 +31,17 @@ nonisolated struct LoginBody: Encodable, Sendable {
     let password: String
 }
 
+/// `POST /employees`, `PATCH /employees/:id`. Fields the signed-in employee may not change are omitted
+/// (see `EmployeeBody.make`).
 nonisolated struct EmployeeBody: Encodable, Sendable {
     var name: String
-    var login: String
+    var login: String?
     /// Omitted when not changing the password.
     var password: String?
     var phone: Nullable<String>
     var color: Nullable<String>
-    var isMaster: Bool
+    var isMaster: Bool?
+    var role: EmployeeRole?
     var active: Bool?
 }
 
@@ -73,9 +76,14 @@ nonisolated struct ServiceBody: Encodable, Sendable {
     var variants: [ServiceVariant] = []
     /// Prepayment required to book the service; 0 — none.
     var depositAmount = 0
+    /// Replaces the masters' own prices; `nil` — unchanged.
+    var masterPrices: [ServiceMasterPrice]? = nil
     var aftercareTemplateId: Nullable<Int>
     /// «Свежий прокол» / «Свежее тату»: aftercare memos are sent only for such services.
     var freshProcedure: Bool
+    /// Post-visit follow-ups of the bot: days until «Как заживает?», weeks until the jewelry change; `null` — never.
+    var healingCheckDays: Nullable<Int>
+    var jewelryChangeWeeks: Nullable<Int>
     /// Replace the compatible jewelry and the consumption norm.
     var jewelryIds: [Int] = []
     var consumables: [ServiceConsumable] = []
@@ -260,6 +268,11 @@ nonisolated struct CategoryCreateBody: Encodable, Sendable {
     let name: String
 }
 
+/// `PATCH /products/:id` with the category only; `null` takes the product out of its category.
+nonisolated struct ProductCategoryBody: Encodable, Sendable {
+    let category: Nullable<String>
+}
+
 /// `POST /stock/revisions` — the counted stock per size and the marked status per presence consumable.
 nonisolated struct StockRevisionBody: Encodable, Hashable, Sendable {
     var section: CatalogSection?
@@ -282,6 +295,9 @@ nonisolated struct SaleItemBody: Encodable, Hashable, Sendable {
     let price: Int
     /// The size sold; required by the server for a product with several sizes.
     var variantId: Int? = nil
+    /// Who a gift certificate (`type: certificate`) is for, and a note kept on it; omitted for other lines.
+    var recipientName: String? = nil
+    var note: String? = nil
 }
 
 /// `POST /sales` and `POST /qr-payments`.
@@ -319,6 +335,38 @@ nonisolated struct ReceiptBody: Encodable, Hashable, Sendable {
 nonisolated struct RefundBody: Encodable, Sendable {
     let reason: String
     let restock: Bool
+    /// The lines and units to return; `nil` — everything not returned yet.
+    var items: [RefundItemBody]? = nil
+}
+
+nonisolated struct RefundItemBody: Codable, Hashable, Sendable {
+    let saleItemId: Int
+    let quantity: Int
+}
+
+/// `POST /sales/:id/refund/preview`.
+nonisolated struct RefundPreviewBody: Encodable, Sendable {
+    var items: [RefundItemBody]?
+}
+
+/// `POST /sales/:id/send` — to a chosen bot chat, else the client's chat.
+nonisolated struct SendReceiptBody: Encodable, Sendable {
+    var chatId: Int64?
+}
+
+/// `POST /stock/deliveries`.
+nonisolated struct DeliveryBody: Encodable, Sendable {
+    var supplier: String?
+    var note: String?
+    var lines: [DeliveryLineBody]
+}
+
+nonisolated struct DeliveryLineBody: Encodable, Hashable, Sendable {
+    let productId: Int
+    let variantId: Int
+    let quantity: Int
+    /// What one unit cost on this delivery; `nil` — unknown (the cost does not change).
+    var unitCost: Int?
 }
 
 nonisolated struct OpenShiftBody: Encodable, Sendable {

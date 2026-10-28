@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// «Касса» hub: shift card, the open receipts of every device with «Новый чек», today's visits not started yet.
-/// Receipts are pushed onto `AppState.posPath`, so the schedule and the client card can land on them too.
+/// «Касса» hub: the shift strip, «К оплате» — open receipts of every device and today's visits not started yet in one
+/// list — and the big «Новая продажа». A card opens its receipt over the hub (`receiptFlow`).
 struct POSView: View {
     @Environment(AppState.self) private var appState
     @Environment(APIClient.self) private var api
@@ -10,38 +10,50 @@ struct POSView: View {
     @Environment(OpenReceiptsStore.self) private var receipts
 
     @State private var queue = Remote<[Appointment]>()
-    @State private var catalog = Remote<[Product]>()
     @State private var opening: POSOpening?
     @State private var deletion: ReceiptDeletion?
+    @State private var showsReceipt = false
+    /// «Мои / Все» picked by hand; `nil` — the default for the employee (`PaymentDueList.defaultScope`).
+    @State private var pickedScope: PaymentDueScope?
     @State private var errorMessage: String?
     @State private var errorTitle = ""
 
     /// While the hub is on screen it refreshes this often, so receipts opened on other phones show up.
     private static let refreshInterval: Duration = .seconds(20)
 
+    private var allItems: [PaymentDue] {
+        PaymentDueList.items(receipts: receipts.list.value ?? [], visits: queue.value ?? [])
+    }
+
+    /// A spinner until both lists have answered; then what loaded, with a retry row for a list that failed.
+    private var loadState: PaymentDueLoadState {
+        PaymentDueLoadState(
+            receipts: (receipts.list.value != nil, receipts.list.failure),
+            visits: (queue.value != nil, queue.failure)
+        )
+    }
+
     var body: some View {
         @Bindable var appState = appState
-        @Bindable var cart = cart
-        @Bindable var receipts = receipts
         NavigationStack(path: $appState.posPath) {
             List {
-                ShiftCardView()
+                ShiftStrip { appState.posPath.append(.shiftsHistory) }
                     .hubRow(top: 4, bottom: 4)
-                OpenReceiptsSection(
-                    receipts: receipts.list,
+                let all = allItems
+                let scope = pickedScope ?? PaymentDueList.defaultScope(all, employee: appState.employee)
+                let visible = PaymentDueList.filtered(all, scope: scope, employeeId: appState.employee?.id)
+                PaymentDueSection(
+                    items: visible,
+                    state: loadState,
+                    scope: PaymentDueList.offersScope(to: appState.employee)
+                        ? Binding(get: { scope }, set: { pickedScope = $0 })
+                        : nil,
+                    hidesAll: visible.isEmpty && !all.isEmpty,
                     cartReceiptId: cart.receiptId,
                     opening: opening,
-                    retry: { await receipts.refresh() },
+                    retry: reload,
                     onOpen: open,
-                    onDelete: { deletion = ReceiptDeletion($0) },
-                    onNew: openNew
-                )
-                PaymentQueueSection(
-                    queue: queue,
-                    openReceipts: receipts.list.value ?? [],
-                    opening: opening,
-                    retry: loadQueue,
-                    onStart: startVisit
+                    onDelete: { deletion = ReceiptDeletion($0) }
                 )
             }
             .listStyle(.plain)
@@ -49,12 +61,13 @@ struct POSView: View {
             .contentMargins(.bottom, 24, for: .scrollContent)
             .auraBackground()
             .scrollEdgeEffectStyle(.soft, for: .top)
+            .safeAreaBar(edge: .bottom) { newSaleButton }
             .refreshable {
                 async let lists: Void = reload()
                 async let shiftRefresh: Void = shift.refresh()
                 _ = await (lists, shiftRefresh)
             }
-            // Runs on every appearance (also when popping back from a receipt) and after each sale.
+            // Runs on every appearance and after each sale.
             .task(id: cart.salesCompleted) {
                 await reload()
                 if !shift.hasLoaded { await shift.refresh() }
@@ -64,76 +77,62 @@ struct POSView: View {
             .remoteErrorAlert(receipts.list)
             .receiptDeletionDialog($deletion, onDelete: delete)
             .navigationTitle("Касса")
-            .toolbar { toolbarContent }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink(value: POSRoute.salesHistory) {
+                        Text("Продажи")
+                    }
+                    .accessibilityHint("История продаж и возвраты")
+                }
+            }
             .navigationDestination(for: POSRoute.self) { route in
-                destination(for: route)
+                switch route {
+                case .salesHistory: SalesHistoryView()
+                case .shiftsHistory: ShiftsHistoryView()
+                }
             }
         }
-        // On the stack (not the root content), so «Оплатить» works from the pushed receipt.
-        .sheet(isPresented: $cart.isCheckoutPresented) {
-            CheckoutView()
+        .receiptFlow(isPresented: $showsReceipt) {
+            Task { await reload() }
         }
-        .background { ReceiptAutosave() }
         .errorAlert($errorMessage, title: errorTitle)
-        .errorAlert($receipts.goneNotice, title: "Чек закрыт")
-        .onChange(of: cart.salesCompleted) {
-            appState.closeReceipt()
-        }
-        .onChange(of: receipts.goneNotice) { _, notice in
-            if notice != nil { appState.closeReceipt() }
-        }
-        .onChange(of: appState.posPath) { old, new in
-            // Leaving the receipt screen saves it at once; a «Новый чек» left empty is deleted.
-            guard old.contains(.receipt), !new.contains(.receipt) else { return }
-            Task { await receipts.leave() }
-        }
     }
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            NavigationLink(value: POSRoute.salesHistory) {
-                Label("История продаж", systemImage: "clock.arrow.circlepath")
+    /// «Новая продажа»: a receipt without a visit; jewelry, goods and services are added in it.
+    private var newSaleButton: some View {
+        Button {
+            run(.newReceipt) { try await receipts.openNew() }
+        } label: {
+            ZStack {
+                Label("Новая продажа", systemImage: "plus")
+                    .opacity(opening == .newReceipt ? 0 : 1)
+                if opening == .newReceipt { ProgressView().tint(.white) }
             }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
         }
-        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-        ToolbarItem(placement: .topBarTrailing) {
-            NavigationLink(value: POSRoute.shiftsHistory) {
-                Label("Смены", systemImage: "tray.full")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func destination(for route: POSRoute) -> some View {
-        switch route {
-        case .receipt:
-            ReceiptView(catalog: catalog)
-        case .clientPicker:
-            ClientPickerView(selection: Binding(get: { cart.client }, set: { cart.client = $0 }))
-        case .salesHistory:
-            SalesHistoryView()
-        case .shiftsHistory:
-            ShiftsHistoryView()
-        }
+        .buttonStyle(.glassProminent)
+        .controlSize(.large)
+        .disabled(opening != nil)
+        .needsConnection()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Actions
 
-    private func open(_ receipt: OpenReceipt) {
-        run(.receipt(receipt.id)) { try await receipts.open(receipt) }
+    private func open(_ item: PaymentDue) {
+        switch item {
+        case .receipt(let receipt):
+            run(.receipt(receipt.id)) { try await receipts.open(receipt) }
+        case .visit(let appointment):
+            // The visit's receipt with its services, client and prepayment (or the one another phone started).
+            run(.visit(appointmentId: appointment.id)) { try await appState.startCheckout(for: appointment) }
+        }
     }
 
-    private func openNew() {
-        run(.newReceipt) { try await receipts.openNew() }
-    }
-
-    /// «Начать визит»: the appointment moves to the open receipts (or joins the receipt another phone started).
-    private func startVisit(_ appointment: Appointment) {
-        run(.visit(appointmentId: appointment.id)) { try await appState.startCheckout(for: appointment) }
-    }
-
-    /// One receipt is opened at a time; on success its screen is pushed.
+    /// One receipt is opened at a time; on success it is shown over the hub.
     private func run(_ target: POSOpening, _ operation: @escaping () async throws -> Void) {
         guard opening == nil else { return }
         opening = target
@@ -141,7 +140,7 @@ struct POSView: View {
             defer { opening = nil }
             do {
                 try await operation()
-                appState.showReceipt()
+                showsReceipt = true
             } catch is CancellationError {
                 return
             } catch {
@@ -179,7 +178,7 @@ struct POSView: View {
         await queue.load { try await api.appointmentsAwaitingPayment() }
     }
 
-    /// Quiet refreshes until the hub disappears (a pushed receipt or another tab cancels the task).
+    /// Quiet refreshes until the hub disappears (another tab cancels the task).
     private func pollWhileVisible() async {
         while !Task.isCancelled {
             try? await Task.sleep(for: Self.refreshInterval)
@@ -194,21 +193,6 @@ struct POSView: View {
     private func refreshQueueQuietly() async {
         guard let appointments = try? await api.appointmentsAwaitingPayment() else { return }
         queue.set(appointments)
-    }
-}
-
-/// Saves the cart's receipt shortly after each change (see `OpenReceiptsStore`). It sits behind the POS stack, so
-/// edits on the receipt screen, in the client picker and in checkout are all caught.
-private struct ReceiptAutosave: View {
-    @Environment(CartStore.self) private var cart
-    @Environment(OpenReceiptsStore.self) private var receipts
-
-    var body: some View {
-        Color.clear
-            .accessibilityHidden(true)
-            .onChange(of: cart.makeReceiptBody()) {
-                receipts.cartDidChange()
-            }
     }
 }
 

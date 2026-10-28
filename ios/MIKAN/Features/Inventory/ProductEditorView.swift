@@ -93,9 +93,10 @@ struct ProductEditorView: View {
                 onDeleted(id)
                 dismiss()
             }
-            // Only names the linked services and orders the categories; pickers report their own load errors.
+            // Only names the linked services; pickers report their own load errors. The categories are asked again
+            // every time, so ones made on another card or phone are offered too.
             .task { try? await reference.ensureServices() }
-            .task { try? await reference.ensureCategories() }
+            .task { try? await reference.ensureCategories(force: true) }
             .errorAlert($errorMessage)
         }
     }
@@ -131,7 +132,7 @@ struct ProductEditorView: View {
             TextField("Артикул", text: $draft.sku)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
-            CategoryField(options: categoryOptions, selection: $draft.category)
+            CategoryField(scope: categoryScope, options: categoryOptions, selection: $draft.category)
             if draft.isConsumable {
                 TextField("Материал", text: $draft.material)
                 if !draft.showsSizesEditor && !draft.isPresenceTracked {
@@ -242,11 +243,13 @@ struct ProductEditorView: View {
 
     // MARK: - Helpers
 
+    private var categoryScope: CategoryScope { CategoryScope(section: CatalogSection(kind: draft.kind)) }
+
     /// The kind's categories in the staff order (with the current one, even when it is new).
     private var categoryOptions: [String] {
         let extra = reference.categories.isEmpty ? Array(categories) : []
         return WarehouseGrouping.categoryOptions(
-            section: CatalogSection(kind: draft.kind),
+            section: categoryScope.section,
             categories: reference.categories,
             products: [],
             extra: extra + [draft.category]
@@ -280,6 +283,7 @@ struct ProductEditorView: View {
                 }
                 onSaved(saved)
                 dismiss()
+                await reference.refreshCategoriesIfUnknown(saved.category, in: CategoryScope(section: CatalogSection(kind: saved.kind)))
             } catch {
                 errorMessage = error.userMessage
             }

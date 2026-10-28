@@ -45,6 +45,7 @@ struct ServicePickerView: View {
                         } label: {
                             ServicePickerRow(
                                 service: service,
+                                masterId: draft.masterId,
                                 count: draft.lineCount(serviceId: service.id),
                                 selectedLine: draft.line(serviceId: service.id)
                             )
@@ -73,7 +74,7 @@ struct ServicePickerView: View {
             presenting: variantService
         ) { service in
             ForEach(service.variants, id: \.self) { variant in
-                Button("\(variant.name) — \(Money.format(variant.price))") {
+                Button("\(variant.name) — \(Money.format(service.price(for: draft.masterId, variant: variant)))") {
                     draft.select(service: service, variant: variant)
                 }
             }
@@ -146,6 +147,8 @@ struct ServicePickerView: View {
 
 private struct ServicePickerRow: View {
     let service: Service
+    /// The appointment's master: the row shows their price.
+    let masterId: Int?
     let count: Int
     let selectedLine: DraftServiceLine?
 
@@ -188,9 +191,9 @@ private struct ServicePickerRow: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    /// «от 2 000 до 5 000 ₽ · 1 ч», with the variant count for services with options.
+    /// «от 2 000 до 5 000 ₽ · 1 ч» (the master's price), with the variant count for services with options.
     private var subtitle: String {
-        var parts = [service.priceText, DateText.duration(minutes: service.durationMin)]
+        var parts = [service.priceText(for: masterId), DateText.duration(minutes: service.durationMin)]
         if !service.variants.isEmpty {
             parts.append(Plural.count(service.variants.count, one: "вариант", few: "варианта", many: "вариантов"))
         }

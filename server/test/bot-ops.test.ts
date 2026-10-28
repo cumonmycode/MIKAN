@@ -99,7 +99,7 @@ describe('bot chats API, staff chat, onboarding and scheduled sender', () => {
     expect(foreign.text).toMatch(/своим номером/);
 
     const created = await handleContact(t.ctx, { ...from, userId: CHAT }, { userId: CHAT, phone: '79990001111', firstName: 'Ольга', lastName: 'Ли' });
-    expect(created).toEqual({ text: 'Спасибо, Ольга! Номер сохранён ✅ Чем могу помочь?', linked: true });
+    expect(created).toEqual({ text: 'Спасибо, Ольга! Номер сохранён ✅ Чем могу помочь?', linked: true, cardLinked: true });
     const client = (await t.api('GET', '/api/clients?search=Ольга')).json().items[0];
     expect(client).toMatchObject({
       name: 'Ольга', lastName: 'Ли', phone: '+79990001111', source: 'telegram', telegramLinked: true, telegramUsername: 'olga',
@@ -111,7 +111,7 @@ describe('bot chats API, staff chat, onboarding and scheduled sender', () => {
     const ivan = await make(t, '/api/clients', { name: 'Иван', phone: '+79995556677' });
     const url = (await t.api('POST', `/api/clients/${ivan.id}/telegram-link`)).json().url as string;
     const linked = handleStart(t.ctx, from, new URL(url).searchParams.get('start')!);
-    expect(linked).toEqual({ text: expect.stringContaining('Иван, ваш Telegram подключён к MIKAN STUDIO ✅'), linked: true });
+    expect(linked).toEqual({ text: expect.stringContaining('Иван, ваш Telegram подключён к MIKAN STUDIO ✅'), linked: true, cardLinked: true });
     expect((await t.api('GET', `/api/clients/${client.id}`)).json().telegramLinked).toBe(false);
     expect((await t.api('GET', `/api/clients/${ivan.id}`)).json().telegramLinked).toBe(true);
     expect(handleStart(t.ctx, from, new URL(url).searchParams.get('start')!).text).toMatch(/устарела/); // token is single use
@@ -123,7 +123,10 @@ describe('bot chats API, staff chat, onboarding and scheduled sender', () => {
   });
 
   it('sends due aftercare/reminders, stores them as system messages, handles blocked/retry/disabled', async () => {
-    const service = await make(t, '/api/services', { name: 'Прокол', category: 'piercing', price: 2500, durationMin: 30, aftercareTemplateId: 2 });
+    // Without the healing check-in (bot-follow-ups.test.ts covers it), so only the memo steps are queued.
+    const service = await make(t, '/api/services', {
+      name: 'Прокол', category: 'piercing', price: 2500, durationMin: 30, aftercareTemplateId: 2, healingCheckDays: null,
+    });
     const client = await make(t, '/api/clients', { name: 'Иван', phone: '+79991234567' });
     const url = (await t.api('POST', `/api/clients/${client.id}/telegram-link`)).json().url as string;
     handleStart(t.ctx, { chatId: CHAT, telegramName: 'Иван', username: null }, new URL(url).searchParams.get('start')!);

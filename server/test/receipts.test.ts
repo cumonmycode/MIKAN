@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTestApp, FakeQrProvider, make, type TestApp } from './helpers.js';
+import { createTestApp, FakeQrProvider, make, openShift, type TestApp } from './helpers.js';
 
 type Json = Record<string, any>;
 
@@ -14,6 +14,7 @@ describe('open receipts (POS)', () => {
   beforeEach(async () => {
     bank = new FakeQrProvider();
     t = await createTestApp({ qr: bank });
+    await openShift(t);
     labret = await make(t, '/api/products', {
       kind: 'jewelry',
       name: 'Лабрет',
@@ -65,8 +66,8 @@ describe('open receipts (POS)', () => {
       appointment: { id: a.id, deposit: 1000, receiptId: expect.any(Number) },
     });
     expect(receipt.items).toEqual([
-      { type: 'service', productId: null, variantId: null, variantName: null, productKind: null, serviceId: lobe.id, name: 'Мочка', quantity: 1, price: 1600, total: 1600, stock: null },
-      { type: 'service', productId: null, variantId: null, variantName: null, productKind: null, serviceId: helix.id, name: 'Хеликс', quantity: 1, price: 2500, total: 2500, stock: null },
+      { type: 'service', productId: null, variantId: null, variantName: null, productKind: null, serviceId: lobe.id, name: 'Мочка', quantity: 1, price: 1600, total: 1600, stock: null, certificate: null },
+      { type: 'service', productId: null, variantId: null, variantName: null, productKind: null, serviceId: helix.id, name: 'Хеликс', quantity: 1, price: 2500, total: 2500, stock: null, certificate: null },
     ]);
     expect((await appointment(a.id)).receiptId).toBe(receipt.id);
 
@@ -101,7 +102,7 @@ describe('open receipts (POS)', () => {
     expect(saved.json()).toMatchObject({ client: { id: client.id }, subtotal: 2300, discount: 200, total: 2100, itemCount: 3, note: 'Подарок' });
     expect(saved.json().items[0]).toEqual({
       type: 'product', productId: labret.id, variantId: labret.variants[1]!.id, variantName: '8 мм', productKind: 'jewelry',
-      serviceId: null, name: 'Лабрет — 8 мм', quantity: 1, price: 1700, total: 1700, stock: 1,
+      serviceId: null, name: 'Лабрет — 8 мм', quantity: 1, price: 1700, total: 1700, stock: 1, certificate: null,
     });
 
     const noSize = await t.api('PUT', `/api/receipts/${receipt.id}`, { items: [{ type: 'product', productId: labret.id, quantity: 1 }] });

@@ -2,7 +2,8 @@ import SwiftUI
 
 @main
 struct MIKANApp: App {
-    @State private var appState = AppState.live()
+    /// Owns the app state, so push notifications reach it from launch on.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
         // Service covers and work photos (AsyncImage → URLSession.shared) repeat across the catalog, POS grid and
@@ -13,7 +14,7 @@ struct MIKANApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .appEnvironment(appState)
+                .appEnvironment(appDelegate.appState)
         }
     }
 }
@@ -21,13 +22,17 @@ struct MIKANApp: App {
 extension View {
     /// Injects the app state, its stores and the Russian locale/calendar.
     func appEnvironment(_ state: AppState) -> some View {
-        environment(state)
+        modifier(PermissionsEnvironment(state: state))
+            .environment(state)
             .environment(state.api)
             .environment(state.shift)
             .environment(state.cart)
             .environment(state.receipts)
             .environment(state.schedule)
             .environment(state.reference)
+            .environment(state.workSchedules)
+            .environment(state.lock)
+            .environment(state.connectivity)
             .environment(\.locale, .app)
             .environment(\.calendar, .app)
     }

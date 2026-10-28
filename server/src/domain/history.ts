@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, type SQL } from 'drizzle-orm';
 import type { DbOrTx } from '../db/client.js';
 import { appointments, appointmentServices, saleItems, sales, services } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
@@ -49,6 +49,8 @@ interface RawEntry {
   employeeId: number;
   appointmentId: number | null;
   saleId: number | null;
+  /** Its line was returned in full by a refund of a sale that is otherwise kept. */
+  returned: boolean;
 }
 
 const lineEntry = (a: AppointmentRow, line: AppointmentServiceRow): RawEntry => ({
@@ -67,6 +69,7 @@ const lineEntry = (a: AppointmentRow, line: AppointmentServiceRow): RawEntry => 
   employeeId: a.masterId,
   appointmentId: a.id,
   saleId: a.saleId,
+  returned: false,
 });
 
 /** An appointment without service lines is listed once, under its title. */
@@ -86,6 +89,7 @@ const titleEntry = (a: AppointmentRow): RawEntry => ({
   employeeId: a.masterId,
   appointmentId: a.id,
   saleId: a.saleId,
+  returned: false,
 });
 
 const saleItemEntry = (sale: SaleRow, item: SaleItemRow): RawEntry => ({
@@ -104,6 +108,7 @@ const saleItemEntry = (sale: SaleRow, item: SaleItemRow): RawEntry => ({
   employeeId: sale.employeeId,
   appointmentId: sale.appointmentId,
   saleId: sale.id,
+  returned: item.refundedQuantity >= item.quantity,
 });
 
 /** Services performed in completed appointments. */
@@ -236,7 +241,43 @@ const newestFirst = (a: RawEntry, b: RawEntry): number =>
   b.date - a.date || numeric(visitKey(b), visitKey(a)) || numeric(a.id, b.id);
 
 function collect(db: DbOrTx, f: HistoryFilter): RawEntry[] {
-  return [...appointmentEntries(db, f), ...saleItemEntries(db, f)].sort(newestFirst);
+  return markReturnedVisitLines(db, [...appointmentEntries(db, f), ...saleItemEntries(db, f)].sort(newestFirst));
+}
+
+/**
+ * A visit paid by a sale that was partly refunded: its service lines whose sale item came back in full read refunded —
+ * matched like `itemsCoveredByAppointments` (by catalog service, else by name, each item once); a visit listed under
+ * its title reads refunded once every service item of the sale came back.
+ */
+function markReturnedVisitLines(db: DbOrTx, entries: RawEntry[]): RawEntry[] {
+  const partly = db
+    .select({ item: saleItems })
+    .from(saleItems)
+    .innerJoin(sales, eq(sales.id, saleItems.saleId))
+    .where(and(eq(sales.status, 'completed'), gt(sales.refundedTotal, 0), isNotNull(sales.appointmentId), eq(saleItems.type, 'service')))
+    .all();
+  if (partly.length === 0) return entries;
+  const returnedKeys = new Map<number, Map<string, number>>();
+  const allReturned = new Map<number, boolean>();
+  for (const { item } of partly) {
+    const done = item.refundedQuantity >= item.quantity;
+    allReturned.set(item.saleId, (allReturned.get(item.saleId) ?? true) && done);
+    if (!done) continue;
+    const keys = returnedKeys.get(item.saleId) ?? new Map<string, number>();
+    const key = lineKey(item.serviceId, item.name);
+    keys.set(key, (keys.get(key) ?? 0) + 1);
+    returnedKeys.set(item.saleId, keys);
+  }
+  return entries.map((e) => {
+    if (e.kind !== 'service' || e.saleId == null || e.id.startsWith('si')) return e;
+    if (e.id.startsWith('at')) return allReturned.get(e.saleId) ? { ...e, returned: true } : e;
+    const keys = returnedKeys.get(e.saleId);
+    const key = lineKey(e.serviceId, e.name);
+    const left = keys?.get(key) ?? 0;
+    if (left === 0) return e;
+    keys!.set(key, left - 1);
+    return { ...e, returned: true };
+  });
 }
 
 function salesByIds(db: DbOrTx, ids: Array<number | null>): Map<number, SaleRow> {
@@ -270,7 +311,7 @@ function hydrate(db: DbOrTx, raw: RawEntry[]): HistoryEntryOut[] {
       appointmentId: e.appointmentId,
       saleId: e.saleId,
       saleNumber: sale?.number ?? null,
-      refunded: sale?.status === 'refunded',
+      refunded: sale?.status === 'refunded' || e.returned,
     };
   });
 }

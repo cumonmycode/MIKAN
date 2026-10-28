@@ -1,0 +1,269 @@
+/* The client cabinet /book/me — built on the booking page's tokens and components (styles.css). */
+
+.cab-tabs {
+  margin-top: 8px;
+}
+
+.cab-tabs .seg {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.cab-tabs .seg.selected {
+  background: var(--surface);
+}
+
+.cab-tabs .seg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cab-panel-enter {
+  animation: enter 0.24s var(--ease);
+}
+
+.cab-section .group-title {
+  margin-top: 22px;
+}
+
+/* ---- the birthday card ---- */
+
+.cab-birthday {
+  margin: 12px 0 4px;
+  padding: 14px 16px;
+}
+
+.cab-birthday .cab-what {
+  margin-top: 0;
+  font-size: inherit;
+}
+
+.cab-birthday-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.cab-birthday-form .btn {
+  min-height: 48px;
+  padding: 10px 16px;
+}
+
+.cab-notice {
+  background: var(--success-bg);
+  color: var(--success);
+  font-weight: 500;
+}
+
+/* ---- appointments ---- */
+
+.cab-visit,
+.cab-memo,
+.cab-cert,
+.cab-balance,
+.cab-current {
+  margin-bottom: 10px;
+  padding: 14px 16px;
+}
+
+.cab-visit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cab-when {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cab-status {
+  flex: none;
+  margin: 0;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.cab-what {
+  margin: 4px 0 2px;
+  font-weight: 500;
+}
+
+.cab-line {
+  margin: 2px 0 0;
+}
+
+.cab-free {
+  color: var(--success);
+}
+
+.cab-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cab-actions .btn {
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.cab-actions .btn:only-child,
+.cab-wide {
+  grid-column: 1 / -1;
+}
+
+/* ---- lists (history, bonuses) ---- */
+
+.cab-list {
+  margin: 0;
+  padding: 0 16px;
+  list-style: none;
+}
+
+.cab-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.cab-row:last-child {
+  border-bottom: 0;
+}
+
+.cab-row-main {
+  min-width: 0;
+}
+
+.cab-row-main p {
+  margin: 0;
+}
+
+.cab-row-title {
+  font-weight: 500;
+}
+
+.cab-row-side {
+  flex: none;
+  text-align: right;
+}
+
+.cab-amount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.cab-plus {
+  color: var(--success);
+}
+
+/* ---- bonuses and certificates ---- */
+
+.cab-balance p {
+  margin: 0;
+}
+
+.cab-balance .cab-balance-value {
+  margin: 2px 0 6px;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.cab-balance .cab-free {
+  margin-top: 8px;
+}
+
+.cab-cert p {
+  margin: 0;
+}
+
+.cab-cert-code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+}
+
+.cab-cert .cab-cert-balance {
+  margin: 4px 0 2px;
+  font-weight: 600;
+}
+
+/* ---- aftercare ---- */
+
+.cab-steps {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cab-step {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.cab-step-today {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.cab-step p {
+  margin: 0;
+}
+
+.cab-step-day {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--muted);
+}
+
+.cab-today {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cab-step .cab-step-text {
+  margin-top: 4px;
+  white-space: pre-line;
+}
+
+/* ---- moving ---- */
+
+.cab-current p {
+  margin: 0;
+}
+
+.cab-current .cab-what {
+  margin: 2px 0;
+}
+
+.cab-bar[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cab-panel-enter {
+    animation: none;
+  }
+}

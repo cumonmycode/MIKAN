@@ -35,6 +35,8 @@ final class OpenReceiptsStore {
     @ObservationIgnored private var closingId: Int?
     /// Created by «Новый чек»: deleted again when it is left without anything in it.
     @ObservationIgnored private var newBlankId: Int?
+    /// The receipt screen just closed: its last save, or deleting a «Новый чек» left empty (see `leaveInBackground`).
+    @ObservationIgnored private var leaving: Task<Void, Never>?
     @ObservationIgnored private var createKey = IdempotencyKey()
 
     init(api: APIClient, cart: CartStore) {
@@ -44,12 +46,15 @@ final class OpenReceiptsStore {
 
     // MARK: List
 
+    /// Waits for a closing receipt to be saved or deleted, so the list never brings back what was just deleted.
     func refresh() async {
+        await leaving?.value
         await list.load { try await api.openReceipts() }
     }
 
     /// Background polling: a failure is only logged, so an offline hub does not show an alert every few seconds.
     func refreshQuietly() async {
+        await leaving?.value
         do {
             list.set(try await api.openReceipts())
         } catch is CancellationError {
@@ -113,6 +118,15 @@ final class OpenReceiptsStore {
             receiptGone(id: id)
         } catch {
             logger.notice("Receipt \(id) refresh failed: \(error.userMessage, privacy: .public)")
+        }
+    }
+
+    /// `leave()` for a receipt screen that just closed, without waiting; list refreshes wait for it.
+    func leaveInBackground() {
+        let previous = leaving
+        leaving = Task { [weak self] in
+            await previous?.value
+            await self?.leave()
         }
     }
 
@@ -259,7 +273,6 @@ final class OpenReceiptsStore {
         guard cart.receiptId == id, closingId != id else { return }
         forget()
         cart.clear()
-        cart.isCheckoutPresented = false
         goneNotice = Self.goneMessage
     }
 

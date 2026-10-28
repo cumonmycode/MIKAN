@@ -1,7 +1,16 @@
 import { Bot, GrammyError, InputFile, InputMediaBuilder } from 'grammy';
-import type { InlineKeyboardMarkup, InputMediaDocument, InputMediaPhoto, InputMediaVideo, Message, ReplyKeyboardMarkup } from 'grammy/types';
+import type {
+  InlineKeyboardButton,
+  InlineKeyboardMarkup,
+  InputMediaDocument,
+  InputMediaPhoto,
+  InputMediaVideo,
+  Message,
+  ReplyKeyboardMarkup,
+} from 'grammy/types';
 import type { AppContext } from '../context.js';
-import { getBotSettings, getCachedBotUsername, setCachedBotUsername } from '../domain/settings.js';
+import { BOOKING_MENU_TEXT, bookingWebAppUrl } from '../domain/online-booking-links.js';
+import { getBotSettings, getCachedBotUsername, getStudioSettings, setCachedBotUsername } from '../domain/settings.js';
 import { errorMessage } from '../lib/errors.js';
 import { toPlainText, toTelegramHtml } from '../lib/telegram-format.js';
 import { splitMessage, TELEGRAM_MAX_CAPTION, TELEGRAM_MAX_MESSAGE, truncate } from '../lib/text.js';
@@ -13,6 +22,7 @@ import {
   type ChatInfo,
   type ChatRef,
   type HtmlOptions,
+  type InlineButton,
   type InlineKeyboard,
   type MediaFile,
   type PhotoSource,
@@ -30,9 +40,15 @@ const API_TIMEOUT_SECONDS = 75; // > long-polling timeout (30 s)
 /** Uploaded pictures remembered by Telegram file_id, so carousel paging does not upload them again. */
 const MAX_CACHED_FILE_IDS = 500;
 
+function inlineButton(b: InlineButton): InlineKeyboardButton {
+  if (b.url !== undefined) return { text: b.text, url: b.url };
+  if (b.webApp !== undefined) return { text: b.text, web_app: { url: b.webApp } };
+  return { text: b.text, callback_data: b.data };
+}
+
 function markup(keyboard: InlineKeyboard | null | undefined): InlineKeyboardMarkup | undefined {
   if (keyboard === undefined) return undefined;
-  return { inline_keyboard: (keyboard ?? []).map((row) => row.map((b) => ({ text: b.text, callback_data: b.data }))) };
+  return { inline_keyboard: (keyboard ?? []).map((row) => row.map(inlineButton)) };
 }
 
 /** Inline buttons win over a keyboard under the input field (a message carries one `reply_markup`). */
@@ -91,9 +107,15 @@ const noAccess = (err: unknown): boolean => err instanceof GrammyError && (err.e
 
 /** Albums are limited by Telegram to 10 items. */
 const MAX_ALBUM = 10;
+/** Telegram's flood limit when it names no wait. */
+const DEFAULT_RETRY_AFTER_SECONDS = 5;
 
 function toSendError(err: unknown): BotSendError {
   if (err instanceof GrammyError) {
+    if (err.error_code === 429) {
+      const seconds = err.parameters.retry_after ?? DEFAULT_RETRY_AFTER_SECONDS;
+      return new BotSendError(`Telegram: ${err.description}`, false, seconds * 1000);
+    }
     const unreachable = err.error_code === 403 || (err.error_code === 400 && /chat not found|user not found/i.test(err.description));
     return new BotSendError(`Telegram: ${err.description}`, unreachable);
   }
@@ -232,6 +254,7 @@ export class BotController implements BotGateway {
             this.polling = true;
             backoff = MIN_BACKOFF_MS;
             this.ctx.log.info({ username: info.username }, 'Telegram bot polling started');
+            void this.setBookingMenuButton(bot);
           },
         });
         if (generation === this.generation) this.polling = false;
@@ -259,6 +282,26 @@ export class BotController implements BotGateway {
       backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
     }
     if (generation === this.generation) this.polling = false;
+  }
+
+  /**
+   * The chat menu button opens the booking Mini App («📅 Записаться», docs/API.md «Online booking») while online
+   * booking is on; off, or without an `https://` PUBLIC_URL, the default menu. A failure is only logged.
+   */
+  private async setBookingMenuButton(bot: Bot): Promise<void> {
+    const url = bookingWebAppUrl(this.ctx.config);
+    const on = url !== null && getStudioSettings(this.ctx.db).onlineBooking.enabled;
+    try {
+      await bot.api.setChatMenuButton({
+        menu_button: on ? { type: 'web_app', text: BOOKING_MENU_TEXT, web_app: { url: url! } } : { type: 'default' },
+      });
+    } catch (err) {
+      this.ctx.log.warn({ err: errorMessage(err) }, 'bot menu button not set');
+    }
+  }
+
+  async refreshBookingMenu(): Promise<void> {
+    if (this.bot && this.polling) await this.setBookingMenuButton(this.bot);
   }
 
   private requireBot(): Bot {

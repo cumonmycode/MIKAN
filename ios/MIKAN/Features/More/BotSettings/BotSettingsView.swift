@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BotSettingsView: View {
     @Environment(APIClient.self) private var api
+    @Environment(\.permissions) private var permissions
     @State private var remote = Remote<BotSettings>()
     @State private var settings: BotSettings?
     @State private var isSaving = false
@@ -15,18 +16,24 @@ struct BotSettingsView: View {
 
     var body: some View {
         Form {
+            if !permissions.editsSettings {
+                ReadOnlyNotice(text: "Настройки бота меняют владелец и администратор. Рабочий чат может подключить любой сотрудник.")
+            }
             if let settings = Binding($settings) {
                 statusSection(settings.wrappedValue)
-                behaviourSection(settings)
-                ReminderScheduleSection(
-                    isEnabled: settings.remindersEnabled,
-                    schedule: settings.reminderSchedule,
-                    supportsSeveral: settings.wrappedValue.supportsReminderOffsets
-                )
-                if settings.wrappedValue.supportsStaffDigests {
-                    StaffDigestSection(settings: settings)
+                Group {
+                    behaviourSection(settings)
+                    ReminderScheduleSection(
+                        isEnabled: settings.remindersEnabled,
+                        schedule: settings.reminderSchedule,
+                        supportsSeveral: settings.wrappedValue.supportsReminderOffsets
+                    )
+                    if settings.wrappedValue.supportsStaffDigests {
+                        StaffDigestSection(settings: settings)
+                    }
+                    messagesSection(settings)
                 }
-                messagesSection(settings)
+                .disabled(!permissions.editsSettings)
                 staffChatSection(settings.wrappedValue)
                 StaffBotSection()
             }
@@ -37,11 +44,13 @@ struct BotSettingsView: View {
         .navigationTitle("Настройки бота")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                if isSaving {
-                    ProgressView()
-                } else {
-                    Button("Сохранить", action: save).disabled(!canSave)
+            if permissions.editsSettings {
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("Сохранить", action: save).disabled(!canSave)
+                    }
                 }
             }
         }

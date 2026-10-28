@@ -2,13 +2,14 @@ import SwiftUI
 
 extension View {
     /// Presents the prepayment flows of the appointment card: the prepayment screen, refund, retain,
-    /// the reminder and the refund-or-retain question after a cancellation / no-show.
+    /// the reminder and the refund-or-retain question after a cancellation / no-show (`decision`).
     func appointmentDepositFlows(
         _ flow: Binding<DepositFlow?>,
         appointment: Appointment,
+        decision: DepositDecision? = nil,
         onChange: @escaping (Appointment) -> Void
     ) -> some View {
-        modifier(AppointmentDepositFlows(flow: flow, appointment: appointment, onChange: onChange))
+        modifier(AppointmentDepositFlows(flow: flow, appointment: appointment, decision: decision, onChange: onChange))
     }
 }
 
@@ -17,13 +18,14 @@ private struct AppointmentDepositFlows: ViewModifier {
 
     @Binding var flow: DepositFlow?
     let appointment: Appointment
+    let decision: DepositDecision?
     let onChange: (Appointment) -> Void
 
     @State private var isWorking = false
     @State private var errorMessage: String?
-    @State private var retryMessage: String?
     @State private var notice: DepositNotice?
-    @State private var retainKey = IdempotencyKey()
+    /// The retain sheet was asked for by the question after a cancellation (not by the card's «Удержать»).
+    @State private var retainFollowsDecision = false
     @State private var successCount = 0
 
     private var held: String { Money.format(appointment.deposit) }
@@ -42,18 +44,16 @@ private struct AppointmentDepositFlows: ViewModifier {
                     successCount += 1
                 }
             }
-            .confirmationDialog("Удержать предоплату \(held)?", isPresented: shows(.retain), titleVisibility: .visible) {
-                Button("Удержать \(held)", role: .destructive, action: retain)
-                Button("Отмена", role: .cancel) {}
-            } message: {
-                Text("Деньги останутся у студии, клиенту они не вернутся.")
+            .sheet(isPresented: shows(.retain), onDismiss: { retainFollowsDecision = false }) {
+                DepositRetainSheet(appointment: appointment, amount: retainPrefill) { updated in
+                    onChange(updated)
+                    successCount += 1
+                }
             }
             .confirmationDialog("Предоплата \(held)", isPresented: shows(.decide), titleVisibility: .visible) {
-                Button("Вернуть клиенту") { flow = .refund }
-                Button("Удержать", role: .destructive, action: retain)
-                Button("Решить позже", role: .cancel) {}
+                decisionButtons
             } message: {
-                Text("Клиент внёс предоплату. Вернуть её или оставить студии? Решить можно и позже в карточке записи.")
+                Text(decision?.message ?? DepositDecision.fallbackMessage)
             }
             .onChange(of: flow) { _, newFlow in
                 if newFlow == .remind { remind() }
@@ -64,8 +64,33 @@ private struct AppointmentDepositFlows: ViewModifier {
                 Text(notice?.message ?? "")
             }
             .errorAlert($errorMessage)
-            .retryAlert($retryMessage, title: "Удержание могло пройти", retry: retain)
             .sensoryFeedback(.success, trigger: successCount)
+    }
+
+    /// Refund-or-retain after a cancellation / no-show; only a refund of the remainder after an automatic retain.
+    @ViewBuilder
+    private var decisionButtons: some View {
+        if let decision, decision.autoRetained > 0 {
+            Button("Вернуть \(held)") { flow = .refund }
+        } else if let decision, decision.suggestsRetain {
+            Button("Удержать \(Money.format(decision.retainPrefill))", role: .destructive, action: retainAsDecided)
+            Button("Вернуть клиенту") { flow = .refund }
+        } else {
+            Button("Вернуть клиенту") { flow = .refund }
+            Button("Удержать", role: .destructive, action: retainAsDecided)
+        }
+        Button("Решить позже", role: .cancel) {}
+    }
+
+    /// From the card's «Удержать»: the rules' share of what is held; after a cancellation: what the question named.
+    private var retainPrefill: Int {
+        if retainFollowsDecision, let decision { return decision.retainPrefill }
+        return DepositRules.retainPrefill(appointment)
+    }
+
+    private func retainAsDecided() {
+        retainFollowsDecision = true
+        flow = .retain
     }
 
     /// Presented while `flow` is `target`; dismissing clears it unless an action already moved on.
@@ -95,24 +120,6 @@ private struct AppointmentDepositFlows: ViewModifier {
                 let text = DepositText.remindNotice(result)
                 notice = DepositNotice(title: text.title, message: text.message)
                 if result.sendError.nonEmpty == nil { successCount += 1 }
-            } catch {
-                errorMessage = error.userMessage
-            }
-        }
-    }
-
-    private func retain() {
-        let body = DepositRetainBody(reason: DepositText.retainReason(for: appointment.status))
-        let key = retainKey.key(for: body)
-        isWorking = true
-        Task {
-            defer { isWorking = false }
-            do {
-                onChange(try await api.retainDeposit(appointmentId: appointment.id, body, idempotencyKey: key))
-                retainKey.reset()
-                successCount += 1
-            } catch let error as APIError where error.isOutcomeUnknown {
-                retryMessage = "Связь прервалась до ответа сервера. Нажмите «Повторить» — если предоплата уже удержана, второй раз это не запишется."
             } catch {
                 errorMessage = error.userMessage
             }

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { productVariants } from '../src/db/schema.js';
-import { createTestApp, FakeQrProvider, make, type TestApp } from './helpers.js';
+import { createTestApp, FakeQrProvider, make, openShift, type TestApp } from './helpers.js';
 
 interface Size {
   id: number;
@@ -19,6 +19,7 @@ describe('jewelry sizes: selling, refunds, QR, history and reports', () => {
   beforeEach(async () => {
     bank = new FakeQrProvider();
     t = await createTestApp({ qr: bank });
+    await openShift(t);
     labret = await make(t, '/api/products', {
       kind: 'jewelry',
       name: 'Лабрет',

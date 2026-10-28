@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MIGRATIONS_DIR } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { listCategories } from '../src/domain/categories.js';
-import { createTestApp, make, type TestApp } from './helpers.js';
+import { createTestApp, make, openShift, type TestApp } from './helpers.js';
 
 interface Category {
   id: number;
@@ -22,6 +22,7 @@ describe('unified warehouse', () => {
   let t: TestApp;
   beforeEach(async () => {
     t = await createTestApp();
+    await openShift(t);
   });
   afterEach(async () => {
     await t.close();

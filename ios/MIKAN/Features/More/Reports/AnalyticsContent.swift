@@ -36,6 +36,9 @@ struct AnalyticsContent: View {
         if analytics.deposits != .zero {
             ReportDepositsCard(deposits: analytics.deposits)
         }
+        if !analytics.loyalty.isZero {
+            AnalyticsLoyaltyCard(loyalty: analytics.loyalty)
+        }
         if analytics.products.margin.quantity > 0 {
             AnalyticsMarginCard(products: analytics.products)
         }
@@ -59,16 +62,23 @@ struct AnalyticsContent: View {
     }
 }
 
+/// A period offered as a chip (analytics, payroll).
+nonisolated protocol PeriodChipOption: CaseIterable, Identifiable, Hashable, Sendable where AllCases == [Self], ID == String {
+    var title: String { get }
+}
+
+nonisolated extension ReportPeriod: PeriodChipOption {}
+
 /// Period chips at the top of the analytics: Liquid Glass capsules, the selected one tinted with the brand color.
-struct AnalyticsPeriodBar: View {
-    @Binding var period: ReportPeriod
+struct AnalyticsPeriodBar<Option: PeriodChipOption>: View {
+    @Binding var period: Option
     @Namespace private var glass
 
     var body: some View {
         ScrollView(.horizontal) {
             GlassEffectContainer(spacing: 8) {
                 HStack(spacing: 8) {
-                    ForEach(ReportPeriod.allCases) { option in
+                    ForEach(Option.allCases) { option in
                         chip(option)
                     }
                 }
@@ -82,7 +92,7 @@ struct AnalyticsPeriodBar: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func chip(_ option: ReportPeriod) -> some View {
+    private func chip(_ option: Option) -> some View {
         let isSelected = option == period
         return Button {
             withAnimation(.snappy) { period = option }

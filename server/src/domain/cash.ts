@@ -1,10 +1,11 @@
 import { asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { DbOrTx } from '../db/client.js';
-import { cashOperations, cashShifts, depositOperations, sales } from '../db/schema.js';
+import { cashOperations, cashShifts, depositOperations, saleRefunds, sales } from '../db/schema.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { cashOpOut, type ShiftRow } from '../lib/serialize.js';
 import { formatShortDateTime, toIso } from '../lib/time.js';
 import { employeeRefOrMissing, employeesByIds } from './refs.js';
+import { refundMoneySql, saleMoneySql } from './sale-revenue.js';
 import { studioTimezone } from './settings.js';
 
 /** Prepayment operations recorded while the shift was open (`deposit_operations.shift_id`). */
@@ -72,15 +73,15 @@ export function getOpenShift(db: DbOrTx): ShiftRow | null {
 }
 
 /**
- * Sales made in the shift (whatever their later status) are counted as income; refunds processed
- * while the shift was open are counted separately, so cash in the drawer stays consistent. Prepayments enter the
+ * Sales made in the shift (whatever their later status) are counted as income; refunds (whole or partial) made
+ * while the shift was open are counted separately by their money, so cash in the drawer stays consistent. Prepayments enter the
  * drawer when received (`deposits.cash`); a sale only consumes them (`deposit`), so they are never counted twice.
  */
 export function shiftSummary(db: DbOrTx, shiftId: number): ShiftSummary {
   const salesAgg = db
     .select({
       n: count(),
-      revenue: sql<number>`coalesce(sum(${sales.total}), 0)`,
+      revenue: sql<number>`coalesce(sum(${saleMoneySql}), 0)`,
       cash: sql<number>`coalesce(sum(${sales.payCash}), 0)`,
       card: sql<number>`coalesce(sum(${sales.payCard}), 0)`,
       transfer: sql<number>`coalesce(sum(${sales.payTransfer}), 0)`,
@@ -92,11 +93,11 @@ export function shiftSummary(db: DbOrTx, shiftId: number): ShiftSummary {
     .get();
   const refundAgg = db
     .select({
-      refunds: sql<number>`coalesce(sum(${sales.total}), 0)`,
-      cashRefunds: sql<number>`coalesce(sum(${sales.payCash}), 0)`,
+      refunds: sql<number>`coalesce(sum(${refundMoneySql}), 0)`,
+      cashRefunds: sql<number>`coalesce(sum(${saleRefunds.payCash}), 0)`,
     })
-    .from(sales)
-    .where(eq(sales.refundShiftId, shiftId))
+    .from(saleRefunds)
+    .where(eq(saleRefunds.shiftId, shiftId))
     .get();
   const opsAgg = db
     .select({

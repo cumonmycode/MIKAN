@@ -4,11 +4,15 @@
  */
 export type PhotoSource = { kind: 'file'; path: string } | { kind: 'url'; url: string };
 
-/** One inline button: `data` is the callback payload (≤ 64 bytes, see TELEGRAM_MAX_CALLBACK_DATA). */
-export interface InlineButton {
-  text: string;
-  data: string;
-}
+/**
+ * One inline button: a callback button (`data` is its payload, ≤ 64 bytes, see TELEGRAM_MAX_CALLBACK_DATA), a link
+ * button (`url`, opened by Telegram itself; nothing comes back to the bot) or a Mini App button (`webApp`, an
+ * `https://` page Telegram opens inside the chat; private chats only).
+ */
+export type InlineButton =
+  | { text: string; data: string; url?: undefined; webApp?: undefined }
+  | { text: string; url: string; data?: undefined; webApp?: undefined }
+  | { text: string; webApp: string; data?: undefined; url?: undefined };
 
 /** Rows of inline buttons under a message. */
 export type InlineKeyboard = InlineButton[][];
@@ -100,6 +104,8 @@ export interface BotGateway {
   getBotMembership(chat: ChatRef): Promise<BotMembership | null>;
   /** Subscribers of a channel (members of a group); null when unavailable. */
   getChatMemberCount(chat: ChatRef): Promise<number | null>;
+  /** Points the chat menu button at the booking Mini App while online booking is on, else the default menu. */
+  refreshBookingMenu?(): Promise<void>;
 }
 
 export class BotUnavailableError extends Error {
@@ -109,14 +115,19 @@ export class BotUnavailableError extends Error {
   }
 }
 
-/** Telegram delivery failure. `blocked` = the user blocked the bot / chat is unreachable (HTTP 403). */
+/**
+ * Telegram delivery failure. `blocked` = the user blocked the bot / chat is unreachable (HTTP 403). `retryAfterMs` —
+ * Telegram's flood limit (HTTP 429): nothing should be sent for that long.
+ */
 export class BotSendError extends Error {
   readonly blocked: boolean;
+  readonly retryAfterMs: number | null;
 
-  constructor(message: string, blocked: boolean) {
+  constructor(message: string, blocked: boolean, retryAfterMs: number | null = null) {
     super(message);
     this.name = 'BotSendError';
     this.blocked = blocked;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 

@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The service card editor: main data, price and variants, time and prepayment, compatible jewelry, the consumption
-/// norm, pictures, the text the bot reads, the aftercare memo and visibility.
+/// The service card editor: main data, price and variants, masters' prices, time and prepayment, compatible jewelry,
+/// the consumption norm, pictures, the text the bot reads, the aftercare memo, the bot's messages after the visit and
+/// visibility.
 struct ServiceEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(APIClient.self) private var api
@@ -48,6 +49,11 @@ struct ServiceEditorView: View {
                     defaultPrice: draft.price.amount,
                     defaultDuration: draft.durationMin
                 )
+                ServiceMasterPricesEditorSection(
+                    prices: $draft.masterPrices,
+                    catalog: draft.price.fields,
+                    variants: draft.variants
+                )
                 durationSection
                 depositSection
                 ServiceJewelryEditorSection(jewelryIds: $draft.jewelryIds, stock: stock, retry: loadStock)
@@ -66,6 +72,7 @@ struct ServiceEditorView: View {
                 )
                 descriptionSection
                 aftercareSection
+                followUpsSection
                 visibilitySection
             }
             .disabled(isSaving)
@@ -115,7 +122,12 @@ struct ServiceEditorView: View {
             }
             .pickerStyle(.segmented)
             .listRowSeparator(.hidden, edges: .top)
-            CategoryField(title: "Группа", options: groupOptions(for: draft.category), selection: $draft.group)
+            CategoryField(
+                title: "Группа",
+                scope: CategoryScope(section: .service, serviceCategory: draft.category),
+                options: groupOptions(for: draft.category),
+                selection: $draft.group
+            )
         } header: {
             Text("Основное")
         } footer: {
@@ -245,6 +257,29 @@ struct ServiceEditorView: View {
             Text("Памятка")
         } footer: {
             Text(draft.aftercareHint)
+        }
+    }
+
+    private var followUpsSection: some View {
+        Section {
+            Toggle("Спросить, как заживает", isOn: $draft.followUps.asksHealing.animation(.snappy))
+            if draft.followUps.asksHealing {
+                Stepper(value: $draft.followUps.healingDays, in: ServiceFollowUpLimits.healingDays) {
+                    LabeledContent("Через", value: ServiceFollowUpText.days(draft.followUps.healingDays))
+                }
+            }
+            if draft.followUps.showsJewelryChange(for: draft.category) {
+                Toggle("Напомнить о замене украшения", isOn: $draft.followUps.remindsJewelryChange.animation(.snappy))
+                if draft.followUps.remindsJewelryChange {
+                    Stepper(value: $draft.followUps.jewelryWeeks, in: ServiceFollowUpLimits.jewelryWeeks) {
+                        LabeledContent("Через", value: ServiceFollowUpText.weeks(draft.followUps.jewelryWeeks))
+                    }
+                }
+            }
+        } header: {
+            Text("После визита")
+        } footer: {
+            Text(draft.followUps.hint)
         }
     }
 

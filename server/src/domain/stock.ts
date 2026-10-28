@@ -20,6 +20,8 @@ export interface MovementInput {
   saleId?: number | null;
   appointmentId?: number | null;
   revisionId?: number | null;
+  /** The delivery (поставка) a receipt belongs to. */
+  deliveryId?: number | null;
   employeeId?: number | null;
   /** Rubles paid (a receipt with a unit cost). */
   amount?: number | null;
@@ -71,7 +73,7 @@ export function assertInWarehouse(product: ProductRow): void {
  * A receipt with what one unit cost: the cost becomes the new cost of what was received — the size's own cost when it
  * has one, else the product's — and the movement keeps the total paid.
  */
-function applyReceiptCost(db: DbOrTx, product: ProductRow, variant: VariantRow, unitCost: number): void {
+export function applyReceiptCost(db: DbOrTx, product: ProductRow, variant: VariantRow, unitCost: number): void {
   const now = Date.now();
   if (variant.cost != null) {
     db.update(productVariants).set({ cost: unitCost, updatedAt: now }).where(eq(productVariants.id, variant.id)).run();
@@ -127,6 +129,7 @@ export function applyMovement(db: DbOrTx, input: MovementInput): { product: Prod
       saleId: input.saleId ?? null,
       appointmentId: input.appointmentId ?? null,
       revisionId: input.revisionId ?? null,
+      deliveryId: input.deliveryId ?? null,
       amount: input.amount ?? null,
       employeeId: input.employeeId ?? null,
       createdAt: now,

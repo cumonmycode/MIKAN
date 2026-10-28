@@ -22,11 +22,12 @@ import {
   stockMovements,
 } from '../db/schema.js';
 import { REVIEW_MARKER } from '../db/seed-content.js';
-import { bookableMasters, freeSlots, SLOT_STEP_MIN, workingWindow } from '../domain/free-slots.js';
+import { bookableMasters, freeSlots } from '../domain/free-slots.js';
 import { hasSizeInStock } from '../domain/products.js';
 import { getCachedBotUsername, getStudioSettings, studioTimezone } from '../domain/settings.js';
+import { scheduleDaysFor, workingIntervals } from '../domain/work-schedule.js';
 import { errorMessage } from '../lib/errors.js';
-import { parseSteps, parseVariants, type ServiceRow } from '../lib/serialize.js';
+import { type EmployeeRow, parseSteps, parseVariants, type ServiceRow } from '../lib/serialize.js';
 import { formatRub, formatServicePrice } from '../lib/text.js';
 import { DAY_MS, localDate, MINUTE_MS } from '../lib/time.js';
 import { listAccounts, listMemory, listReports } from './db.js';
@@ -199,12 +200,12 @@ function nextDates(tz: string, from: number, count: number): string[] {
   return Array.from({ length: count }, (_, i) => start.plus({ days: from + i }).toISODate() ?? '').filter(Boolean);
 }
 
-/** Начала свободных слотов подряд → окна [начало, конец). */
-function windowsOf(starts: number[]): [number, number][] {
+/** Начала свободных слотов подряд (шаг сетки `stepMs`) → окна [начало, конец). */
+function windowsOf(starts: number[], stepMs: number): [number, number][] {
   const out: [number, number][] = [];
   for (const start of starts) {
     const last = out[out.length - 1];
-    if (last && start <= last[1] - WINDOW_MIN * MINUTE_MS + SLOT_STEP_MIN * MINUTE_MS) last[1] = start + WINDOW_MIN * MINUTE_MS;
+    if (last && start <= last[1] - WINDOW_MIN * MINUTE_MS + stepMs) last[1] = start + WINDOW_MIN * MINUTE_MS;
     else out.push([start, start + WINDOW_MIN * MINUTE_MS]);
   }
   return out;
@@ -214,11 +215,13 @@ function windowsOf(starts: number[]): [number, number][] {
 function freeWindows(ctx: AppContext, days: number): string[] {
   const tz = studioTimezone(ctx.db);
   const now = Date.now();
+  // freeSlots puts starts on the online-booking grid by default; windows are glued on the same step.
+  const stepMs = getStudioSettings(ctx.db).onlineBooking.stepMinutes * MINUTE_MS;
   const dates = nextDates(tz, 0, days);
   const byMaster = new Map<string, string[]>();
   for (const date of dates) {
     for (const { master, starts } of freeSlots(ctx.db, { date, durationMin: WINDOW_MIN, now })) {
-      const windows = windowsOf(starts);
+      const windows = windowsOf(starts, stepMs);
       if (!windows.length) continue;
       const name = firstName(master.name) || 'мастер';
       const text = `${dayLabel(date, tz)} ${windows.map(([a, b]) => `${hhmm(a, tz)}–${hhmm(b, tz)}`).join(', ')}`;
@@ -234,32 +237,48 @@ function freeWindows(ctx: AppContext, days: number): string[] {
   ];
 }
 
-/** Загрузка мастеров по дням: занятые минуты рабочего времени / (мастера × рабочие минуты). */
-function dayLoad(ctx: AppContext, date: string, masterIds: number[]): number | null {
-  const window = workingWindow(ctx.db, date);
-  if (!window || !masterIds.length || window.close <= window.open) return null;
+/**
+ * Загрузка мастеров за день: занятые минуты их рабочего времени / все их рабочие минуты (у каждого свой график,
+ * перерывы не в счёт). null — в этот день никто не работает.
+ */
+function dayLoad(ctx: AppContext, date: string, masters: EmployeeRow[], tz: string): number | null {
+  const shifts = scheduleDaysFor(ctx.db, masters, [date])
+    .map((day) => ({ masterId: day.employeeId, intervals: workingIntervals(day, tz) }))
+    .filter((shift) => shift.intervals.length > 0);
+  if (!shifts.length) return null;
+  const from = Math.min(...shifts.map((shift) => shift.intervals[0]!.start));
+  const to = Math.max(...shifts.map((shift) => shift.intervals.at(-1)!.end));
   const busy = ctx.db
-    .select({ startsAt: appointments.startsAt, endsAt: appointments.endsAt })
+    .select({ masterId: appointments.masterId, startsAt: appointments.startsAt, endsAt: appointments.endsAt })
     .from(appointments)
     .where(
       and(
-        inArray(appointments.masterId, masterIds),
-        lt(appointments.startsAt, window.close),
-        gt(appointments.endsAt, window.open),
+        inArray(appointments.masterId, shifts.map((shift) => shift.masterId)),
+        lt(appointments.startsAt, to),
+        gt(appointments.endsAt, from),
         notInArray(appointments.status, INACTIVE),
       ),
     )
     .all();
-  const taken = busy.reduce((sum, b) => sum + Math.min(b.endsAt, window.close) - Math.max(b.startsAt, window.open), 0);
-  return taken / ((window.close - window.open) * masterIds.length);
+  let total = 0;
+  let taken = 0;
+  for (const { masterId, intervals } of shifts) {
+    for (const { start, end } of intervals) {
+      total += end - start;
+      for (const b of busy) {
+        if (b.masterId === masterId) taken += Math.max(0, Math.min(b.endsAt, end) - Math.max(b.startsAt, start));
+      }
+    }
+  }
+  return total > 0 ? taken / total : null;
 }
 
 /** Тихие дни (загрузка ниже 30%) с завтрашнего дня на две недели — повод позвать на них. */
 function quietDays(ctx: AppContext, days: number): string[] {
   const tz = studioTimezone(ctx.db);
-  const masterIds = bookableMasters(ctx.db).map((m) => m.id);
+  const masters = bookableMasters(ctx.db);
   const quiet = nextDates(tz, 1, days)
-    .map((date) => ({ date, load: dayLoad(ctx, date, masterIds) }))
+    .map((date) => ({ date, load: dayLoad(ctx, date, masters, tz) }))
     .filter((d): d is { date: string; load: number } => d.load !== null && d.load < QUIET_LOAD);
   if (!quiet.length) return [];
   return [

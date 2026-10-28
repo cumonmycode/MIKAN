@@ -4,6 +4,8 @@ import { appointments, depositOperations, qrPayments } from '../db/schema.js';
 import { badRequest, conflict } from '../lib/errors.js';
 import type { AppointmentRow, DepositOperationRow, QrPaymentRow, SaleRow } from '../lib/serialize.js';
 import { formatRub } from '../lib/text.js';
+import { auditAutoRetain } from './audit-events.js';
+import { closingRetain } from './cancellation.js';
 import { getOpenShift } from './cash.js';
 import {
   appointmentLedger,
@@ -14,6 +16,7 @@ import {
   type DepositOperationType,
 } from './deposit-ledger.js';
 import { getAppointmentRow } from './refs.js';
+import { getStudioSettings } from './settings.js';
 
 /**
  * The prepayment ledger write side. Every movement is a new `deposit_operations` row; money is counted once, when it
@@ -147,7 +150,7 @@ export function retainDeposit(
   db: DbOrTx,
   appointmentId: number,
   input: { amount?: number; reason?: string | null },
-  employeeId: number,
+  employeeId: number | null,
 ): AppointmentRow {
   return db.transaction((tx) => {
     const appointment = getAppointmentRow(tx, appointmentId);
@@ -169,6 +172,28 @@ export function retainDeposit(
   });
 }
 
+/**
+ * `StudioSettings.cancellation.autoRetain`: the appointment has just been cancelled (at `at`) or marked a no-show —
+ * keep the share the rules name of what it holds (nothing for a free cancellation). The remainder stays held for
+ * staff to refund. Returns the updated row, or null when nothing was retained.
+ */
+export function autoRetainDeposit(
+  db: DbOrTx,
+  appointment: AppointmentRow,
+  at: number,
+  employeeId: number | null,
+): AppointmentRow | null {
+  const rules = getStudioSettings(db).cancellation;
+  if (!rules.autoRetain) return null;
+  const held = heldDeposit(db, appointment.id);
+  if (held <= 0) return null;
+  const retain = closingRetain(appointment.status, appointment.startsAt, at, held, rules);
+  if (!retain || retain.amount <= 0) return null;
+  const row = retainDeposit(db, appointment.id, retain, employeeId);
+  auditAutoRetain(db, row, retain);
+  return row;
+}
+
 /** Checkout: `amount` of the held prepayment is counted in `sale` (validated by `prepareSale`). */
 export function applyDeposit(db: DbOrTx, sale: SaleRow, amount: number, employeeId: number): void {
   if (amount <= 0 || sale.appointmentId == null) return;
@@ -184,16 +209,25 @@ export function applyDeposit(db: DbOrTx, sale: SaleRow, amount: number, employee
   });
 }
 
-/** Sale refund: the prepayment part of the sale is not paid out — it is held for the appointment again. */
-export function unapplyDeposit(db: DbOrTx, sale: SaleRow, shiftId: number | null, employeeId: number, now: number): void {
-  if (sale.payDeposit <= 0 || sale.appointmentId == null) return;
+/**
+ * Sale refund: the refund's prepayment part (`amount`) is not paid out — it is held for the appointment again. A sale
+ * refunded in parts may unapply its prepayment in several steps.
+ */
+export function unapplyDeposit(
+  db: DbOrTx,
+  sale: SaleRow,
+  refund: { amount: number; shiftId: number | null; note: string },
+  employeeId: number,
+  now: number,
+): void {
+  if (refund.amount <= 0 || sale.appointmentId == null) return;
   insertOperation(db, {
     appointmentId: sale.appointmentId,
     type: 'unapply',
-    amount: sale.payDeposit,
-    shiftId,
+    amount: refund.amount,
+    shiftId: refund.shiftId,
     saleId: sale.id,
-    note: `Возврат чека №${sale.number}`,
+    note: refund.note,
     employeeId,
     createdAt: now,
   });

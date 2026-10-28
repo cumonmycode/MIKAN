@@ -29,6 +29,8 @@ COPY --from=build --chown=node:node /app/drizzle ./drizzle
 COPY --chown=node:node assets ./assets
 # Russian Trusted Root CA: trusted for Tochka Bank API calls only (see src/payments/tochka.ts).
 COPY --chown=node:node certs ./certs
+# Client booking page and Telegram Mini App, served at /book (dist/routes/booking-page.js reads ../../public/book).
+COPY --chown=node:node public ./public
 COPY --chown=node:node package.json ./
 RUN mkdir -p /app/data && chown node:node /app/data
 USER node

@@ -1,32 +1,14 @@
 import Foundation
 
-/// Screens pushed inside the «Касса» tab. The path lives in `AppState.posPath`, so other tabs can open a receipt.
+/// Screens pushed inside the «Касса» tab (`AppState.posPath`). A receipt is not one of them: it is shown over the
+/// screen it was opened from (`receiptFlow`).
 nonisolated enum POSRoute: Hashable, Sendable {
-    case receipt
-    case clientPicker
     case salesHistory
     case shiftsHistory
 }
 
 /// Texts for the receipt that is being assembled in the cart.
-enum ReceiptDraft {
-    /// "По записи · 14:00–15:00 · Анна · Хеликс"
-    static func appointmentBanner(_ appointment: Appointment) -> String {
-        let time = DateText.timeRange(appointment.startsAt, appointment.endsAt)
-        return "По записи · \(time) · \(appointment.client.fullName) · \(appointment.displayTitle)"
-    }
-
-    /// "Мастер Анна · предоплата 2 000 ₽ зачтётся", or with a held prepayment larger than the receipt
-    /// "Мастер Анна · из предоплаты 5 000 ₽ зачтётся 3 000 ₽".
-    static func appointmentDetails(master: String, deposit: Int, applied: Int) -> String {
-        let prefix = "Мастер \(master)"
-        guard deposit > 0 else { return prefix }
-        if applied > 0, applied < deposit {
-            return "\(prefix) · из предоплаты \(Money.format(deposit)) зачтётся \(Money.format(applied))"
-        }
-        return "\(prefix) · предоплата \(Money.format(deposit)) зачтётся"
-    }
-
+nonisolated enum ReceiptDraft {
     /// "внесена переводом 15 октября" — the latest prepayment receipt of the appointment; `nil` without one.
     static func depositReceivedNote(_ operations: [DepositOperation]) -> String? {
         guard let receive = operations.last(where: { $0.type == .receive }) else { return nil }
@@ -36,7 +18,7 @@ enum ReceiptDraft {
     }
 }
 
-/// Search and category filter for the jewelry catalog on the receipt screen.
+/// Search and category filter of the product catalog over a receipt.
 nonisolated enum ProductCatalogFilter {
     static func categories(of products: [Product]) -> [String] {
         Array(Set(products.compactMap(\.category.nonEmpty))).sorted()
@@ -60,13 +42,5 @@ nonisolated enum ProductCatalogFilter {
         return (fields + sizes)
             .compactMap { $0.nonEmpty?.lowercased() }
             .joined(separator: " ")
-    }
-
-    /// Splits tiles into fixed-width rows, so a `List` can lay out (and lazily load) the grid row by row.
-    static func rows(_ products: [Product], columns: Int) -> [[Product]] {
-        guard columns > 0 else { return [] }
-        return stride(from: 0, to: products.count, by: columns).map { start in
-            Array(products[start..<min(start + columns, products.count)])
-        }
     }
 }

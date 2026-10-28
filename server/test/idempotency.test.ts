@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalJson, IDEMPOTENCY_TTL_MS } from '../src/lib/idempotency.js';
-import { ADMIN, createTestApp, make, type TestApp } from './helpers.js';
+import { ADMIN, createTestApp, make, openShift, type TestApp } from './helpers.js';
 
 describe('Idempotency-Key on write endpoints', () => {
   let t: TestApp;
@@ -35,6 +35,7 @@ describe('Idempotency-Key on write endpoints', () => {
     (await t.api('GET', `/api/products/${product.id}/movements`)).json().items.filter((m: { type: string }) => m.type === type);
 
   it('replays the stored sale for a repeated key without a second sale or stock movement', async () => {
+    await openShift(t);
     const key = randomUUID();
     const first = await post('/api/sales', saleBody(), key);
     expect(first.statusCode).toBe(200);
@@ -53,6 +54,7 @@ describe('Idempotency-Key on write endpoints', () => {
   });
 
   it('rejects a reused key with a different body or endpoint with 409 and writes nothing', async () => {
+    await openShift(t);
     const key = randomUUID();
     expect((await post('/api/sales', saleBody(), key)).statusCode).toBe(200);
 
@@ -70,6 +72,7 @@ describe('Idempotency-Key on write endpoints', () => {
   });
 
   it('keeps the old behaviour without the header and validates the header format', async () => {
+    await openShift(t);
     expect((await post('/api/sales', saleBody())).statusCode).toBe(200);
     expect((await post('/api/sales', saleBody())).statusCode).toBe(200);
     expect((await t.api('GET', '/api/sales')).json().total).toBe(2);
@@ -81,6 +84,7 @@ describe('Idempotency-Key on write endpoints', () => {
   });
 
   it('does not store failures: the same key succeeds once the cause is fixed', async () => {
+    await openShift(t);
     const key = randomUUID();
     const body = saleBody({ items: [{ type: 'product', productId: product.id, quantity: 4 }], payments: { cash: 6000 } });
     const short = await post('/api/sales', body, key);
@@ -95,6 +99,7 @@ describe('Idempotency-Key on write endpoints', () => {
   });
 
   it('scopes keys per employee', async () => {
+    await openShift(t);
     await make(t, '/api/employees', { name: 'Анна', login: 'anna', password: 'pass123', isMaster: true });
     const login = await t.app.inject({ method: 'POST', url: '/api/auth/login', payload: { login: 'anna', password: 'pass123' } });
     const annaToken = login.json<{ token: string }>().token;
@@ -108,6 +113,7 @@ describe('Idempotency-Key on write endpoints', () => {
   });
 
   it('forgets keys after 24 hours', async () => {
+    await openShift(t);
     const key = randomUUID();
     await post('/api/sales', saleBody(), key);
     t.ctx.sqlite.prepare('UPDATE idempotency_keys SET created_at = ?').run(Date.now() - IDEMPOTENCY_TTL_MS - 1000);
@@ -119,7 +125,7 @@ describe('Idempotency-Key on write endpoints', () => {
   });
 
   it('replays a refund without returning stock twice', async () => {
-    await t.api('POST', '/api/cash/shift/open', { openingCash: 0 });
+    await openShift(t);
     const sale = (await post('/api/sales', saleBody())).json();
     const key = randomUUID();
     const refund = await post(`/api/sales/${sale.id}/refund`, { reason: 'Не подошло', restock: true }, key);

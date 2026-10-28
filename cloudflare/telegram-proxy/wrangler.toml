@@ -8,7 +8,19 @@ ALLOWED_BOT_IDS = "8960400388"
 # The MIKAN server whose SMM files Meta fetches through /media/smm-<file> (→ https://<ORIGIN_HOST>/uploads/smm-<file>).
 # Keep in sync with DOMAIN in deploy/.env (see deploy/README.md → «Смена домена»).
 ORIGIN_HOST = "95-170-124-192.sslip.io"
+# Checked from outside every 5 minutes; update it together with DOMAIN on the server (deploy/README.md, «Смена домена»).
+HEALTH_URL = "https://95-170-124-192.sslip.io/api/health"
 
-# Secret of the /web/<key>/… route (t.me and Instagram for the SMM marketer) — not stored here:
+# Secrets (not in this file): TELEGRAM_BOT_TOKEN, ALERT_CHAT_ID — `npx wrangler secret put <NAME>`.
+# Secret of the /web/<key>/… route (t.me and Instagram for the SMM marketer), also not stored here:
 #   npx wrangler secret put WEB_RELAY_KEY
 # The same value goes to SMM_RELAY_KEY in the server's .env (at least 16 characters, e.g. `openssl rand -hex 24`).
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Uptime-check state (consecutive failures, down flag, time of the last alert).
+# Create once with `npx wrangler kv namespace create UPTIME` and paste the printed id here.
+[[kv_namespaces]]
+binding = "UPTIME"
+id = "REPLACE_WITH_UPTIME_KV_ID"

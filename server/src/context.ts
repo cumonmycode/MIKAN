@@ -4,6 +4,7 @@ import type { Config } from './config.js';
 import type { Db, Sqlite } from './db/client.js';
 import type { GeneratedImage, ImageGenConfig } from './lib/service-images.js';
 import type { QrProvider } from './payments/qr-provider.js';
+import type { ApnsTransport } from './push/apns.js';
 
 export interface Logger {
   debug(obj: unknown, msg?: string): void;
@@ -37,6 +38,8 @@ export interface AppContext {
   smmFetch?: typeof fetch;
   /** SBP QR payments (Tochka); null when the bank credentials are not configured. */
   qr: QrProvider | null;
+  /** Delivers staff pushes (HTTP/2 to Apple in prod, a fake in tests); nothing is pushed without it or `config.apns`. */
+  apns?: ApnsTransport;
   /** Invoked after bot settings change (start/stop polling). */
   onBotSettingsChanged: () => void;
 }

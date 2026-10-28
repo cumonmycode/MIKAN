@@ -91,7 +91,7 @@ describe('grammY handlers (no network)', () => {
     expect(reply!.text).toMatch(/Чтобы начать, нажмите «📱 Поделиться номером» внизу 👇/);
     expect(reply!.reply_markup).toMatchObject({ resize_keyboard: true, is_persistent: true });
     expect(keyboardOf(reply!)).toEqual([[{ text: '📱 Поделиться номером', request_contact: true }]]);
-    expect(mainKeyboard(true).build().flat().map((b) => b.text)).toEqual(['💉 Услуги и цены', '💎 Украшения', '📅 Записаться', '🩹 Уход после процедуры']);
+    expect(mainKeyboard(true).build().flat().map((b) => b.text)).toEqual(['💉 Услуги и цены', '💎 Украшения', '📅 Записаться', '🩹 Уход после процедуры', '👤 Мои записи и бонусы']);
   });
 
   it('nothing works until a new chat shares its phone; then the earlier question gets its answer', async () => {
@@ -110,7 +110,8 @@ describe('grammY handlers (no network)', () => {
     await pipeline.idle();
     expect(replies().map((r) => r.text)).toEqual(['Спасибо, Ольга! Номер сохранён ✅ Чем могу помочь?']);
     expect(keyboardOf(replies()[0]!).flat().map((b) => b.text)).toContain('💎 Украшения');
-    expect(t.gateway.textsTo(USER).at(-1)).toBe('Мочка — 1 600 ₽ 🙂');
+    // The answer (the birthday question follows it, see bot-birthday.test.ts).
+    expect(t.gateway.textsTo(USER)).toContain('Мочка — 1 600 ₽ 🙂');
     // The AI saw the question asked before the phone.
     expect(JSON.stringify(ai.calls[0]!.messages)).toContain('Сколько стоит прокол мочки?');
     const client = (await t.api('GET', '/api/clients?search=79990001122')).json().items[0];
@@ -346,7 +347,7 @@ describe('BotController polling lifecycle (#9)', () => {
 });
 
 describe('BotController sending', () => {
-  it('sends a keyboard under the input field with the last chunk; inline buttons win over it', async () => {
+  it('sends a keyboard under the input field with the last chunk; inline buttons (callback or link) win over it', async () => {
     const t = await createTestApp({ env: { BOT_ENABLED: 'true', TELEGRAM_BOT_TOKEN: '123:fake' } });
     const sent: Array<Record<string, unknown>> = [];
     let finish: (() => void) | null = null;
@@ -380,6 +381,11 @@ describe('BotController sending', () => {
       is_persistent: true,
     });
     expect(sent[1]!.reply_markup).toEqual({ inline_keyboard: [[{ text: 'Все', callback_data: 'x' }]] });
+    // Link buttons (review links) open the URL; callback buttons next to them keep their payload.
+    await controller.sendText(USER, 'Отзыв', { keyboard: [[{ text: '⭐ Google', url: 'https://g.page/mikan' }], [{ text: 'Все', data: 'x' }]] });
+    expect(sent[2]!.reply_markup).toEqual({
+      inline_keyboard: [[{ text: '⭐ Google', url: 'https://g.page/mikan' }], [{ text: 'Все', callback_data: 'x' }]],
+    });
 
     await controller.stop();
     await t.close();
