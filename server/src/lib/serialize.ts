@@ -510,6 +510,7 @@ export const botMessageOut = (m: BotMessageRow, employee: EmployeeRef | null) =>
   role: m.role,
   text: m.text,
   employee,
+  photoFile: m.photoFile,
   createdAt: toIso(m.createdAt),
 });
 export type BotMessageOut = ReturnType<typeof botMessageOut>;

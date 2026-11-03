@@ -22,7 +22,7 @@ import { resolveCategory, serviceScope } from '../domain/categories.js';
 import { DEFAULT_HEALING_CHECK_DAYS, HEALING_CHECK_DAYS_MAX, JEWELRY_CHANGE_WEEKS_MAX } from '../domain/follow-ups.js';
 import { masterPricesJson, pruneMasterVariants, type MasterPriceInput } from '../domain/service-prices.js';
 import { serializeService, serializeServices, setCompatibleJewelry, setConsumptionNorms } from '../domain/services.js';
-import { sniffImage } from './uploads.js';
+import { sniffImage } from '../lib/image-type.js';
 
 const MAX_PHOTOS = 12;
 const MAX_VARIANTS = 20;

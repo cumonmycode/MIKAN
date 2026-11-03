@@ -5,7 +5,7 @@
 ```
 /opt/mikan/server/          исходники API (собираются в Docker)
 /opt/mikan/deploy/          docker-compose.yml, Caddyfile, .env, data/
-/opt/mikan/deploy/data/     mikan.db, uploads/ (фото), backups/ (ежедневные копии БД)
+/opt/mikan/deploy/data/     mikan.db, uploads/ (фото), chat-photos/ (фото клиентов из чатов с ботом), backups/ (ежедневные копии БД)
 ```
 
 Стек: контейнер `api` (Node.js, порт 3000 только внутри сети Docker) и `caddy` (80/443, автоматический HTTPS, проксирует на `api`).
@@ -89,6 +89,8 @@ curl https://95-170-124-192.sslip.io/api/health
   ```
 - Фото товаров лежат в `data/uploads/` — копируйте каталог целиком:
   `rsync -az mikan:/opt/mikan/deploy/data/uploads/ ./uploads-backup/`
+- Фото клиентов из чатов лежат в `data/chat-photos/` и открываются только сотрудникам через API. Ни в копии базы,
+  ни в архив вне сервера они не входят — при необходимости копируйте каталог так же, через `rsync`.
 
 ## Бэкапы вне сервера
 

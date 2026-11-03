@@ -657,6 +657,8 @@ export const botMessages = sqliteTable(
     role: text('role').notNull(),
     text: text('text').notNull(),
     employeeId: integer('employee_id').references(() => employees.id),
+    /** The picture a client sent, under DATA_DIR/chat-photos (see domain/chat-photos.ts). */
+    photoFile: text('photo_file'),
     createdAt: ms('created_at').notNull(),
   },
   (t) => [index('bot_messages_chat_idx').on(t.chatId, t.id)],

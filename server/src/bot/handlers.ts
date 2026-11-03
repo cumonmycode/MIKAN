@@ -46,6 +46,23 @@ async function fetchImage(deps: HandlerDeps, fileId: string, mediaType: PendingI
   }
 }
 
+/**
+ * The picture of a message, if it has one the bot can take: a photo or an image sent as a file, within the size limit.
+ * Not awaited by the callers: grammY handles updates one by one, so a slow download must not stall other chats.
+ */
+function messageImage(deps: HandlerDeps, message: NonNullable<Context['message']>): Promise<PendingImage | undefined> | undefined {
+  if (message.photo) {
+    const best = [...message.photo].reverse().find((s) => (s.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES);
+    return best ? fetchImage(deps, best.file_id, 'image/jpeg') : undefined;
+  }
+  const doc = message.document;
+  const mediaType = doc?.mime_type ? IMAGE_TYPES[doc.mime_type] : undefined;
+  return doc && mediaType && (doc.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES ? fetchImage(deps, doc.file_id, mediaType) : undefined;
+}
+
+/** The chat history's text of a picture the bot took. */
+const photoText = (caption: string | undefined): string => (caption ? `[Фото] ${caption}` : '[Фото]');
+
 /** What a message is, for the chat history: its text, or a label of the attachment with its caption. */
 export function describeMessage(message: Context['message']): string {
   if (!message) return '[Сообщение]';
@@ -122,7 +139,8 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
       await c.reply(PHONE_REQUIRED, { reply_markup: mainKeyboard(false) });
       return;
     }
-    await pipeline.receiveWithoutPhone(from, describeMessage(c.message));
+    const image = c.message && messageImage(deps, c.message);
+    await pipeline.receiveWithoutPhone(from, image ? photoText(c.message?.caption?.trim()) : describeMessage(c.message), image);
   });
 
   // Interactive catalogs: the keyboard buttons and /catalog open menus with inline buttons (no AI call).
@@ -165,21 +183,16 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     const caption = c.message.caption?.trim();
     // Staff: the caption may be the awaited SMM remark or the link to a published post.
     if (caption && (await onSmmPrivate(ctx, c.chat.id, caption))) return;
-    const sizes = [...c.message.photo].reverse();
-    const best = sizes.find((s) => (s.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES);
-    // Not awaited: grammY handles updates one by one, so a slow download must not stall other chats.
-    // The pipeline awaits the promise when it builds the AI request.
-    const image = best ? fetchImage(deps, best.file_id, 'image/jpeg') : undefined;
-    pipeline.receive(sender(c), caption ? `[Фото] ${caption}` : '[Фото]', image);
+    // The pipeline awaits the download when it builds the AI request.
+    pipeline.receive(sender(c), photoText(caption), messageImage(deps, c.message));
   });
 
   pm.on('message:document', async (c) => {
     const doc = c.message.document;
     const caption = c.message.caption?.trim();
-    const mediaType = doc.mime_type ? IMAGE_TYPES[doc.mime_type] : undefined;
-    if (mediaType && (doc.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES) {
-      const image = fetchImage(deps, doc.file_id, mediaType);
-      pipeline.receive(sender(c), caption ? `[Фото] ${caption}` : '[Фото]', image);
+    const image = messageImage(deps, c.message);
+    if (image) {
+      pipeline.receive(sender(c), photoText(caption), image);
       return;
     }
     pipeline.receive(sender(c), `[Файл «${doc.file_name ?? 'без названия'}»]${caption ? ` ${caption}` : ''}`);

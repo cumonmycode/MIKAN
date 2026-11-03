@@ -25,7 +25,7 @@ import {
 import { studyInBackground } from '../smm/study.js';
 import { SmmError, type SmmProfile } from '../smm/types.js';
 import { IMAGE_MAX_BYTES, param, profileOf, readUpload, SMM_BASE } from './smm.js';
-import { sniffImage } from './uploads.js';
+import { sniffImage } from '../lib/image-type.js';
 
 /**
  * The marketer's knowledge base in the app (ported from Titan HUB `knowledge.router.ts`), per profile: the portrait

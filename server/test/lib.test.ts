@@ -19,7 +19,7 @@ import {
   toIso,
 } from '../src/lib/time.js';
 import { formatZodError, likePattern, parse, phoneInput } from '../src/lib/validation.js';
-import { sniffImage } from '../src/routes/uploads.js';
+import { sniffImage } from '../src/lib/image-type.js';
 
 describe('phone normalization', () => {
   it.each([

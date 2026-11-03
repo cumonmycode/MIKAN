@@ -638,9 +638,10 @@ price — and completes the visit. Cancelled visits and no-shows are left as the
 ### BotMessage
 ```json
 { "id": 1, "chatId": 123456789, "role": "user", "text": "Сколько стоит прокол хеликса?",
-  "employee": { EmployeeRef } | null, "createdAt": "..." }
+  "employee": { EmployeeRef } | null, "photoFile": "3f2a….jpg" | null, "createdAt": "..." }
 ```
 `role`: `user` (client) | `assistant` (AI) | `staff` (sent from the app by an employee) | `system` (automatic: aftercare, reminders, campaigns, birthday and win-back messages).
+`photoFile`: the picture a client sent (a photo or an image file up to 5 MB), read with `GET /bot/photos/:file`. `text` stays `[Фото]` or `[Фото] <caption>`. It is `null` for other messages, for photos received before the server kept them and while the photo is still downloading (the message appears first, the field a moment later) or failed to download, over the limit of 30 kept photos per chat in 24 hours and with under 1 GB free on the disk. HEIC and files over 5 MB are not kept: they stay `[Файл «…»]`.
 
 ### ScheduledMessage
 ```json
@@ -2236,6 +2237,7 @@ Most cards have no birthday, so greetings rarely go out. The birthday is collect
 |---|---|---|---|
 | GET | `/bot/chats` | — | `{ items: [BotChat] }` sorted by `updatedAt` desc |
 | GET | `/bot/chats/:chatId/messages?beforeId=&limit=50` | — | `{ items: [BotMessage] }` ascending by time (the page *before* `beforeId`) |
+| GET | `/bot/photos/:file` | — | the bytes of a client's picture (`BotMessage.photoFile`), `Content-Type` by the real format · needs the staff token: these are photos of people, there is no public link (they are not under `/uploads`), and the answer is `Cache-Control: private, no-store` · `404` for an unknown name |
 | POST | `/bot/chats/:chatId/messages` | `{ text }` | `BotMessage` (role `staff`, delivered to Telegram immediately; clears `needsAttention`) |
 | POST | `/bot/chats/:chatId/read` | — | `204` (unreadCount → 0, needsAttention → false) |
 | PATCH | `/bot/chats/:chatId` | `{ aiPaused }` | `BotChat` |

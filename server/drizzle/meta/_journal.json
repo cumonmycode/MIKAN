@@ -155,6 +155,13 @@
       "when": 1793204346065,
       "tag": "0022_smm",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1793698958840,
+      "tag": "0023_bot_message_photo",
+      "breakpoints": true
     }
   ]
 }

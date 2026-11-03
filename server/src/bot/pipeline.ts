@@ -3,6 +3,7 @@ import type { AppContext } from '../context.js';
 import { aiUsage, botMessages, clients } from '../db/schema.js';
 import { noteAiOutcome } from '../domain/alerts.js';
 import { chatEmployee, findChat, storeMessage, updateChatFlags, upsertChat } from '../domain/bot-chats.js';
+import { keepChatPhoto } from '../domain/chat-photos.js';
 import { getBotSettings, studioTimezone } from '../domain/settings.js';
 import { AppError, conflict, errorMessage } from '../lib/errors.js';
 import type { BotChatRow, BotMessageRow, ProductRow, ServiceRow } from '../lib/serialize.js';
@@ -112,6 +113,8 @@ export class BotPipeline {
   private readonly images = new Map<number, Map<number, Promise<PendingImage | undefined>>>();
   /** chatId → id of the newest user message already handed to a run. */
   private readonly handledUpTo = new Map<number, number>();
+  /** Client photos being saved for staff. */
+  private readonly photoSaves = new Set<Promise<void>>();
 
   constructor(
     private readonly ctx: AppContext,
@@ -122,7 +125,11 @@ export class BotPipeline {
     upsertChat(this.ctx.db, from.chatId, { telegramName: from.telegramName, username: from.username });
     this.pinBaseline(from.chatId);
     const message = storeMessage(this.ctx.db, from.chatId, 'user', text, { bumpUnread: true });
-    if (image) this.addImage(from.chatId, message.id, Promise.resolve(image));
+    if (image) {
+      const pending = Promise.resolve(image);
+      this.addImage(from.chatId, message.id, pending);
+      this.keepPhoto(message, pending);
+    }
     this.schedule(from.chatId);
     return message;
   }
@@ -151,10 +158,11 @@ export class BotPipeline {
    * A chat that has not shared its phone yet: the message is kept for staff and left unanswered (the AI answers it
    * once the phone is shared, see `answerPending`); the bot only asks for the phone — no AI call.
    */
-  async receiveWithoutPhone(from: IncomingFrom, text: string): Promise<void> {
+  async receiveWithoutPhone(from: IncomingFrom, text: string, image?: ImageInput): Promise<void> {
     upsertChat(this.ctx.db, from.chatId, { telegramName: from.telegramName, username: from.username });
     this.pinBaseline(from.chatId);
-    storeMessage(this.ctx.db, from.chatId, 'user', text, { bumpUnread: true });
+    const message = storeMessage(this.ctx.db, from.chatId, 'user', text, { bumpUnread: true });
+    if (image) this.keepPhoto(message, Promise.resolve(image));
     try {
       await this.ctx.gateway.sendText(from.chatId, PHONE_REQUIRED, { replyKeyboard: PHONE_KEYBOARD });
       storeMessage(this.ctx.db, from.chatId, 'assistant', PHONE_REQUIRED);
@@ -176,7 +184,22 @@ export class BotPipeline {
 
   /** Resolves when all queued work has finished (tests, graceful shutdown). */
   async idle(): Promise<void> {
-    while (this.runs.size > 0) await Promise.allSettled([...this.runs.values()]);
+    while (this.runs.size > 0 || this.photoSaves.size > 0) {
+      await Promise.allSettled([...this.runs.values(), ...this.photoSaves]);
+    }
+  }
+
+  /** Saves a client's photo for staff once it has downloaded; a failure only leaves the `[Фото]` label in the chat. */
+  private keepPhoto(message: BotMessageRow, image: Promise<PendingImage | undefined>): void {
+    const save: Promise<void> = image
+      .then(async (photo) => {
+        if (!photo) return;
+        const notKept = await keepChatPhoto(this.ctx.db, this.ctx.config.dataDir, message, Buffer.from(photo.data, 'base64'));
+        if (notKept) this.ctx.log.warn({ messageId: message.id, reason: notKept }, 'client photo not kept');
+      })
+      .catch((err: unknown) => this.ctx.log.warn({ messageId: message.id, err: errorMessage(err) }, 'failed to keep client photo'))
+      .finally(() => this.photoSaves.delete(save));
+    this.photoSaves.add(save);
   }
 
   /** Number of images currently held in memory (for tests/diagnostics). */

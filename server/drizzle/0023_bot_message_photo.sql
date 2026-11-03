@@ -1,0 +1,1 @@
+ALTER TABLE `bot_messages` ADD `photo_file` text;
