@@ -11,9 +11,13 @@ private struct AppLockCover: ViewModifier {
     let lock: AppLock
     let signedIn: Bool
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isSceneCaptured) private var isSceneCaptured
 
     private var isCovered: Bool { signedIn && lock.isCovered }
     private var asksNow: Bool { signedIn && lock.isLocked && scenePhase == .active }
+    /// The system's call interface keeps the scene inactive with the app on screen, and the blur would stay for the whole
+    /// call; a screen share would show it to the other side. So the blur then comes only with the background.
+    private var staysOnScreen: Bool { lock.callWatch.isOnCall || isSceneCaptured }
 
     func body(content: Content) -> some View {
         content
@@ -26,10 +30,14 @@ private struct AppLockCover: ViewModifier {
                         .transition(.opacity)
                 }
             }
-            // Covering is instant, so the app switcher's snapshot never catches the content; revealing fades.
+            // Covering is instant, so off a call the app switcher's snapshot never catches the content; revealing fades.
             .animation(isCovered ? nil : .smooth(duration: 0.25), value: isCovered)
             .onChange(of: scenePhase) { _, phase in
-                lock.scenePhaseChanged(to: phase, signedIn: signedIn)
+                lock.callWatch.refresh()
+                lock.scenePhaseChanged(to: phase, signedIn: signedIn, staysOnScreen: staysOnScreen)
+            }
+            .onChange(of: staysOnScreen) { _, stays in
+                lock.scenePhaseChanged(to: scenePhase, signedIn: signedIn, staysOnScreen: stays)
             }
             .task(id: asksNow) {
                 guard asksNow else { return }

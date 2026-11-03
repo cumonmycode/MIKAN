@@ -547,6 +547,7 @@
 		FCF17D31604F3EED756B0839 /* Waitlist.swift in Sources */ = {isa = PBXBuildFile; fileRef = B79642F8BCA08C90D0C26F31 /* Waitlist.swift */; };
 		FCFDA2479570B8C58A18613F /* CategoryItemsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0F1F541E694548D980212 /* CategoryItemsView.swift */; };
 		FE46B5572095C7298913B390 /* FreshProcedureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 745FE6898BFE3E2FD49448C7 /* FreshProcedureTests.swift */; };
+		FFCF8D7CEFDBACF6812F3A7A /* CallWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = B806D060BEAADE6FC6C08F38 /* CallWatch.swift */; };
 		FFFFC646C27DE1309E7D030E /* POSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 982A2AC33D35C05CE3052EEB /* POSView.swift */; };
 /* End PBXBuildFile section */
 
@@ -948,6 +949,7 @@
 		B6D97326206F2DAA9448358A /* BotSettingsSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotSettingsSheets.swift; sourceTree = "<group>"; };
 		B79642F8BCA08C90D0C26F31 /* Waitlist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Waitlist.swift; sourceTree = "<group>"; };
 		B7D9ED3D0E6DA33021317905 /* InventoryFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryFilter.swift; sourceTree = "<group>"; };
+		B806D060BEAADE6FC6C08F38 /* CallWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallWatch.swift; sourceTree = "<group>"; };
 		B82AC74F4AC11FF620A34C8A /* ProductRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductRow.swift; sourceTree = "<group>"; };
 		B8F652F63A3AC1E0C72CC751 /* ShiftsHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftsHistoryView.swift; sourceTree = "<group>"; };
 		BA5178F9E092040DB1A98A93 /* Employee.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Employee.swift; sourceTree = "<group>"; };
@@ -1865,6 +1867,7 @@
 			children = (
 				86AF5791FFD1755E853DB55F /* AppLock.swift */,
 				3ED31399253F2E6DC801E02B /* AppLockRule.swift */,
+				B806D060BEAADE6FC6C08F38 /* CallWatch.swift */,
 				A9CFEC3ED9C6470AD43E535A /* DeviceAuthentication.swift */,
 			);
 			path = Security;
@@ -2320,6 +2323,7 @@
 				E97F1C821C7E0BDF5E18A073 /* BotSettingsView.swift in Sources */,
 				61BEDDCD8D0E23E53A856BC5 /* BotTestView.swift in Sources */,
 				2DF2882B85ED04403CD919B0 /* CalendarPeriod.swift in Sources */,
+				FFCF8D7CEFDBACF6812F3A7A /* CallWatch.swift in Sources */,
 				38B9640C4FD80B896A270062 /* Campaign.swift in Sources */,
 				C683EE6C4567C7378AFB0735 /* CampaignDetailSections.swift in Sources */,
 				AC202BB5C11DBCE1D7F521F1 /* CampaignDetailView.swift in Sources */,
