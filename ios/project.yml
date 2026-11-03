@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "25"
+    CURRENT_PROJECT_VERSION: "26"
     # Apple Developer Team used for automatic signing (TestFlight / App Store Connect).
     DEVELOPMENT_TEAM: G99YH9UK8C
     CODE_SIGN_STYLE: Automatic
