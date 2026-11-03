@@ -4,6 +4,7 @@ import type { AppContext } from '../context.js';
 import type { DbOrTx } from '../db/client.js';
 import { appointments, clients } from '../db/schema.js';
 import { updateAppointment } from '../domain/appointments.js';
+import { auditClientConfirm, auditClientReschedule } from '../domain/audit-events.js';
 import { SLOT_HORIZON_DAYS, SLOT_LEAD_MIN, withinWorkingHours } from '../domain/free-slots.js';
 import { employeesByIds, serviceLinesByAppointment, servicesByIds } from '../domain/refs.js';
 import { ACTIVE_APPOINTMENT_STATUSES } from '../domain/scheduling.js';
@@ -94,7 +95,7 @@ export function ownActiveAppointment(db: DbOrTx, clientId: number, appointmentId
 }
 
 /**
- * Moves the client's appointment to `startsAt` keeping its duration and master. Only inside the working hours,
+ * Moves the client's appointment to `startsAt` keeping its duration and master. Only inside the master's working time,
  * not in the past, through the regular schedule-conflict check; reminders are re-synced by the domain update.
  * `dryRun` (the app's bot test) checks everything and writes nothing.
  */
@@ -115,8 +116,8 @@ export async function rescheduleForClient(
   if (input.startsAt > now + SLOT_HORIZON_DAYS * DAY_MS) {
     return { ok: false, text: `Перенос возможен не дальше чем на ${SLOT_HORIZON_DAYS} дней вперёд — для более поздней даты передай вопрос администратору.` };
   }
-  if (!withinWorkingHours(db, input.startsAt, endsAt)) {
-    return { ok: false, text: 'Это время вне часов работы студии. Возьми время из free_slots.' };
+  if (!withinWorkingHours(db, input.startsAt, endsAt, current.masterId)) {
+    return { ok: false, text: 'Это время вне часов работы мастера. Возьми время из free_slots.' };
   }
   if (input.startsAt === current.startsAt) return { ok: false, text: 'Запись уже назначена на это время.' };
   const before = formatHumanDateTime(current.startsAt, tz);
@@ -133,6 +134,7 @@ export async function rescheduleForClient(
     }
     throw err;
   }
+  auditClientReschedule(ctx, current, moved);
   const client = db.select().from(clients).where(eq(clients.id, current.clientId)).get();
   const master = employeesByIds(db, [moved.masterId]).get(moved.masterId);
   const what = appointmentWhat(db, [moved]).get(moved.id);
@@ -152,6 +154,7 @@ export async function confirmForClient(ctx: AppContext, clientId: number, appoin
   const when = formatHumanDateTime(own.appointment.startsAt, tz);
   if (own.appointment.status === 'confirmed') return { ok: true, appointment: own.appointment, text: `Запись уже подтверждена — ждём вас ${when} ✨` };
   const row = updateAppointment(ctx.db, appointmentId, { status: 'confirmed' });
+  auditClientConfirm(ctx, own.appointment, row);
   const client = ctx.db.select().from(clients).where(eq(clients.id, clientId)).get();
   const master = employeesByIds(ctx.db, [row.masterId]).get(row.masterId);
   await notifyStaff(

@@ -39,6 +39,7 @@ struct TimeGridContent: View {
                     ForEach(blocks(columnWidth: columnWidth)) { block in
                         NavigationLink(value: block.appointment) {
                             AppointmentBlock(appointment: block.appointment, compact: compact, height: block.frame.height)
+                                .appointmentDragSource(block.appointment, frame: block.frame)
                         }
                         .buttonStyle(.plain)
                         .frame(width: block.frame.width, height: block.frame.height)
@@ -50,6 +51,7 @@ struct TimeGridContent: View {
                             .offset(x: CGFloat(todayIndex) * columnWidth)
                     }
                 }
+                .appointmentDragLayer(dragGrid(columnWidth: columnWidth), compact: compact)
             }
         }
         .frame(height: TimeGridLayout.y(forMinute: Double(range.upperBound), hourHeight: hourHeight, rangeStart: range.lowerBound))
@@ -82,6 +84,11 @@ struct TimeGridContent: View {
                 return Block(id: "\(placement.id)-\(dayIndex)", appointment: appointment, frame: frame)
             }
         }
+    }
+
+    /// Days are the drop columns; the appointment keeps its master (the grid has no master columns).
+    private func dragGrid(columnWidth: CGFloat) -> DragGrid {
+        DragGrid(columns: days.map { DragColumn(day: $0) }, columnWidth: columnWidth, hourHeight: hourHeight, range: range)
     }
 
     private func createAppointment(at location: CGPoint, columnWidth: CGFloat) {

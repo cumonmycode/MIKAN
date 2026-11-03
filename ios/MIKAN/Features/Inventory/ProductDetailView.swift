@@ -4,6 +4,7 @@ struct ProductDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(APIClient.self) private var api
     @Environment(ReferenceStore.self) private var reference
+    @Environment(\.permissions) private var permissions
     let categories: Set<String>
     /// Runs after the product was deleted; the card closes itself.
     let onDelete: (Int) -> Void
@@ -59,13 +60,15 @@ struct ProductDetailView: View {
                             onSelect: setPresence,
                             onPurchase: { showsPurchase = true }
                         )
+                        .disabled(!permissions.editsCatalog)
                     } else {
                         ProductStockCard(product: product)
-                        actions
+                        if permissions.editsCatalog { actions }
                         if showsSizesCard {
                             ProductSizesCard(product: product) { type, variant in
                                 movementRequest = StockMovementRequest(type: type, variantId: variant.id)
                             }
+                            .disabled(!permissions.editsCatalog)
                         }
                     }
                     ProductCharacteristicsCard(product: product, serviceNames: serviceNames)
@@ -85,6 +88,7 @@ struct ProductDetailView: View {
                         }
                     }
                     historyCard
+                    AuditHistoryCard(scope: .product(id: product.id))
                 }
                 .padding(.horizontal, 16)
             }
@@ -94,18 +98,20 @@ struct ProductDetailView: View {
         .ignoresSafeArea(edges: .top)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Изменить") { showsEditor = true }
-                    .disabled(isDeleting)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                if isDeleting {
-                    ProgressView()
-                } else {
-                    Menu {
-                        Button("Удалить", systemImage: "trash", role: .destructive) { confirmsDelete = true }
-                    } label: {
-                        Label("Ещё", systemImage: "ellipsis")
+            if permissions.editsCatalog {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Изменить") { showsEditor = true }
+                        .disabled(isDeleting)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if isDeleting {
+                        ProgressView()
+                    } else {
+                        Menu {
+                            Button("Удалить", systemImage: "trash", role: .destructive) { confirmsDelete = true }
+                        } label: {
+                            Label("Ещё", systemImage: "ellipsis")
+                        }
                     }
                 }
             }
@@ -225,7 +231,7 @@ struct ProductDetailView: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(items) { movement in
-                    MovementRow(movement: movement, unit: product.unitLabel)
+                    MovementLink(movement: movement, unit: product.unitLabel, inCard: true)
                     if movement.id != items.last?.id { Divider() }
                 }
             } else if let failure = movements.failure {

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Запись в MIKAN STUDIO</title>
+  <meta name="description" content="Онлайн-запись на тату и пирсинг в MIKAN STUDIO: выберите услугу, мастера и удобное время.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fafaf8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0e0e" media="(prefers-color-scheme: dark)">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="referrer" content="no-referrer">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="MIKAN STUDIO">
+  <meta property="og:title" content="Запись в MIKAN STUDIO">
+  <meta property="og:description" content="Выберите услугу, мастера и удобное время — запись за пару минут.">
+  <meta property="og:url" content="{{ORIGIN}}/book">
+  <meta property="og:image" content="{{ORIGIN}}/book/og.png">
+  <meta property="og:image:width" content="600">
+  <meta property="og:image:height" content="600">
+  <meta property="og:image:alt" content="MIKAN">
+  <meta property="og:locale" content="ru_RU">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="/book/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/book/apple-touch-icon.png">
+  <link rel="stylesheet" href="{{ASSETS}}/styles.css">
+  <link rel="stylesheet" href="{{ASSETS}}/portfolio.css">
+  <link rel="stylesheet" href="{{ASSETS}}/cabinet.css">
+{{PRELOAD}}
+  <script type="module" src="{{ASSETS}}/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <button id="back-button" class="back" type="button" aria-label="Назад" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <p class="brand">MIKAN STUDIO</p>
+      <p id="step-label" class="step-label"></p>
+    </div>
+  </header>
+  <main id="app" class="main">
+    <div class="loading" role="status"><span class="spinner" aria-hidden="true"></span>Загружаем…</div>
+  </main>
+  <div id="bar" class="bar" hidden>
+    <div class="bar-inner">
+      <p id="bar-summary" class="bar-summary"></p>
+      <button id="bar-button" class="btn btn-primary bar-button" type="button">Дальше</button>
+    </div>
+  </div>
+  <div id="live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <noscript><p class="noscript">Для записи включите JavaScript в браузере — или позвоните нам, запишем по телефону.</p></noscript>
+</body>
+</html>

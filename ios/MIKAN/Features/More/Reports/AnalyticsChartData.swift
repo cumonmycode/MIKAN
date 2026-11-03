@@ -59,13 +59,18 @@ nonisolated enum AnalyticsChartData {
         return visible.map { Slice(id: $0.id, title: $0.title, symbol: $0.symbol, amount: $0.amount, share: ReportText.share($0.amount, of: total)) }
     }
 
-    /// How the sales were paid: the methods used, then the part covered by prepayments received earlier.
+    /// How the sales were paid: the methods used, then the part covered by prepayments received earlier,
+    /// bonuses and gift certificates.
     static func paymentSlices(_ payments: Payments) -> [Slice] {
         let split = PaymentSplit(payments)
         let methods = [PaymentMethod.cash, .transfer, .qr, .card].map { method in
             (id: method.rawValue, title: method.title, symbol: method.symbol, amount: split[method])
         }
-        return slices(methods + [(id: "deposit", title: "Из предоплат", symbol: "rublesign.circle", amount: payments.deposit)])
+        return slices(methods + [
+            (id: "deposit", title: "Из предоплат", symbol: "rublesign.circle", amount: payments.deposit),
+            (id: "bonus", title: "Бонусами", symbol: PaymentLine.bonusSymbol, amount: payments.bonus),
+            (id: "certificate", title: "Сертификатами", symbol: PaymentLine.certificateSymbol, amount: payments.certificate),
+        ])
     }
 
     /// Services against each product kind that sold.

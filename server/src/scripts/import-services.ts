@@ -21,6 +21,7 @@ import path from 'node:path';
 import { asc, eq, isNotNull } from 'drizzle-orm';
 import { openDatabase, type Db, type DbOrTx } from '../db/client.js';
 import { aftercareTemplates, appointmentServices, appointments, services } from '../db/schema.js';
+import { DEFAULT_HEALING_CHECK_DAYS } from '../domain/follow-ups.js';
 import { parseVariants } from '../lib/serialize.js';
 import { normalizeSearchTerm } from '../lib/text.js';
 import { isEntryPoint } from './cli.js';
@@ -208,6 +209,7 @@ function insertService(
       photosJson: '[]',
       aftercareTemplateId: templateId,
       freshProcedure: templateId !== null,
+      healingCheckDays: templateId !== null ? DEFAULT_HEALING_CHECK_DAYS : null,
       active: true,
       createdAt: now,
       updatedAt: now,

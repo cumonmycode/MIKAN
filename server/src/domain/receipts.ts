@@ -15,11 +15,14 @@ import {
   servicesByIds,
   variantsByIds,
 } from './refs.js';
+import { assertDiscountSparesCertificates, CERTIFICATE_LINE_NAME, certificateNominal } from './certificates.js';
+import { servicePriceFor, tillPricingMaster } from './service-prices.js';
 import { assertInWarehouse, resolveVariant } from './stock.js';
 
 /** A line of an open receipt as stored in `open_receipts.items_json`. */
 export interface ReceiptItem {
-  type: 'product' | 'service';
+  /** `certificate` — a gift certificate to sell (issued by the sale that pays the receipt). */
+  type: 'product' | 'service' | 'certificate';
   productId: number | null;
   variantId: number | null;
   serviceId: number | null;
@@ -27,17 +30,22 @@ export interface ReceiptItem {
   name: string;
   quantity: number;
   price: number;
+  /** Certificate lines: whom it is for and a note. */
+  recipientName?: string | null;
+  note?: string | null;
 }
 
 /** A line as the app sends it: the shape of a sale item. */
 export interface ReceiptItemInput {
-  type: 'product' | 'service';
+  type: 'product' | 'service' | 'certificate';
   productId?: number | null;
   variantId?: number | null;
   serviceId?: number | null;
   name?: string | null;
   quantity: number;
   price?: number | null;
+  recipientName?: string | null;
+  note?: string | null;
 }
 
 export interface ReceiptInput {
@@ -51,8 +59,22 @@ export interface ReceiptInput {
 
 const RECEIPT_GONE = 'Чек уже оплачен или удалён';
 
-function resolveItem(db: DbOrTx, item: ReceiptItemInput, position: number): ReceiptItem {
+/** `masterId` — whose prices a service line without a price gets (see `tillPricingMaster`). */
+function resolveItem(db: DbOrTx, item: ReceiptItemInput, position: number, masterId: number | null): ReceiptItem {
   const label = `Позиция №${position + 1}`;
+  if (item.type === 'certificate') {
+    return {
+      type: 'certificate',
+      productId: null,
+      variantId: null,
+      serviceId: null,
+      name: CERTIFICATE_LINE_NAME,
+      quantity: 1,
+      price: certificateNominal(item, label),
+      recipientName: item.recipientName?.trim() || null,
+      note: item.note?.trim() || null,
+    };
+  }
   if (item.type === 'product') {
     if (item.productId == null) throw badRequest(`${label}: выберите товар`);
     const product = db.select().from(products).where(eq(products.id, item.productId)).get();
@@ -87,15 +109,20 @@ function resolveItem(db: DbOrTx, item: ReceiptItemInput, position: number): Rece
     serviceId: service?.id ?? null,
     name,
     quantity: item.quantity,
-    price: item.price ?? service?.price ?? 0,
+    price: item.price ?? (service ? servicePriceFor(service, null, masterId) : 0),
   };
 }
+
+const resolveItems = (db: DbOrTx, items: ReceiptItemInput[], masterId: number | null): ReceiptItem[] =>
+  items.map((item, i) => resolveItem(db, item, i, masterId));
 
 const subtotalOf = (items: Array<Pick<ReceiptItem, 'price' | 'quantity'>>) =>
   items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
 function assertDiscount(items: ReceiptItem[], discount: number): void {
-  if (discount > subtotalOf(items)) throw badRequest('Скидка не может быть больше суммы чека');
+  const subtotal = subtotalOf(items);
+  if (discount > subtotal) throw badRequest('Скидка не может быть больше суммы чека');
+  assertDiscountSparesCertificates(discount, subtotal, subtotalOf(items.filter((i) => i.type === 'certificate')));
 }
 
 function clientMustExist(db: DbOrTx, clientId: number | null): void {
@@ -179,10 +206,10 @@ export function createReceipt(db: DbOrTx, input: ReceiptInput, employeeId: numbe
       if (existing) return existing;
       const appointment = getAppointmentOrMissing(tx, input.appointmentId);
       assertReceiptable(tx, appointment);
-      items = input.items ? input.items.map((item, i) => resolveItem(tx, item, i)) : appointmentItems(tx, appointment);
+      items = input.items ? resolveItems(tx, input.items, tillPricingMaster(tx, appointment.id, employeeId)) : appointmentItems(tx, appointment);
       clientId = clientId ?? appointment.clientId;
     } else {
-      items = (input.items ?? []).map((item, i) => resolveItem(tx, item, i));
+      items = resolveItems(tx, input.items ?? [], tillPricingMaster(tx, null, employeeId));
     }
     clientMustExist(tx, clientId);
     const discount = input.discount ?? 0;
@@ -215,7 +242,8 @@ export function updateReceipt(db: DbOrTx, id: number, input: ReceiptInput): Open
       if (other && other.id !== id) throw conflict('По этой записи уже открыт другой чек');
       assertReceiptable(tx, getAppointmentOrMissing(tx, appointmentId));
     }
-    const items = (input.items ?? []).map((item, i) => resolveItem(tx, item, i));
+    // Service prices of the appointment's master, else of the employee who opened the receipt.
+    const items = resolveItems(tx, input.items ?? [], tillPricingMaster(tx, appointmentId, current.employeeId));
     const clientId = input.clientId ?? null;
     clientMustExist(tx, clientId);
     const discount = input.discount ?? 0;
@@ -280,8 +308,10 @@ export function serializeReceipts(db: DbOrTx, rows: OpenReceiptRow[]) {
       const product = item.productId != null ? productMap.get(item.productId) : undefined;
       const variant = item.variantId != null ? variantMap.get(item.variantId) : undefined;
       const isProduct = item.type === 'product';
+      const isCertificate = item.type === 'certificate';
       return {
-        type: item.type,
+        // A certificate to sell goes out as a service line with `certificate` (older builds know two types).
+        type: isCertificate ? 'service' : item.type,
         productId: item.productId,
         variantId: item.variantId,
         variantName: isProduct && variant ? variant.name.trim() || null : null,
@@ -292,6 +322,7 @@ export function serializeReceipts(db: DbOrTx, rows: OpenReceiptRow[]) {
         price: item.price,
         total: item.price * item.quantity,
         stock: isProduct && variant && !variant.archived ? variant.quantity : null,
+        certificate: isCertificate ? { recipientName: item.recipientName ?? null, note: item.note ?? null } : null,
       };
     });
     const subtotal = lines.reduce((sum, l) => sum + l.total, 0);

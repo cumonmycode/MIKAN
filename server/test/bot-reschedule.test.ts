@@ -71,10 +71,10 @@ describe('bot: free slots and rescheduling', () => {
     for (const taken of ['12:30', '13:00', '13:30', '14:00']) expect(around).not.toContain(taken);
     expect(slots('2026-10-16', { excludeAppointmentId: busy.id })[0]!.starts).toHaveLength(19);
 
-    // Both masters without a masterId; today starts an hour from now (12:00 → 13:00).
+    // Both masters without a masterId; today starts `onlineBooking.leadMinutes` (2 h) from now (12:00 → 14:00).
     const today = freeSlots(t.ctx.db, { date: '2026-10-15', durationMin: 30 });
     expect(today.map((m) => m.master.name).sort()).toEqual(['Админ', 'Борис']);
-    expect(hhmm(today[0]!.starts[0]!)).toBe('13:00');
+    expect(hhmm(today[0]!.starts[0]!)).toBe('14:00');
 
     // Another timezone and working hours move the window.
     await t.api('PUT', '/api/settings/studio', { timezone: 'Asia/Novosibirsk', workdayStart: '10:00', workdayEnd: '12:00' });

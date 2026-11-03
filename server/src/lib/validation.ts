@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { badRequest } from './errors.js';
+import { isStoredBirthday } from './birthday.js';
 import { normalizePhone, isPlausiblePhone } from './phone.js';
 import { isValidCalendarDate, parseInstant } from './time.js';
 
@@ -32,9 +33,22 @@ const FIELD_LABELS: Record<string, string> = {
   openingCash: 'Наличные на начало смены',
   closingCash: 'Наличные в кассе',
   amount: 'Сумма',
+  employeeId: 'Сотрудник',
+  date: 'Дата',
+  fromCash: 'Выдать из кассы',
+  effectiveFrom: 'Действует с',
+  salaryMonthly: 'Оклад в месяц',
+  perDay: 'Оплата за рабочий день',
+  servicePercent: 'Процент с услуг',
+  categoryPercent: 'Процент по разделу',
+  tattoo: 'Тату',
+  piercing: 'Пирсинг',
+  productPercent: 'Процент с продажи товаров',
+  deductMaterials: 'Вычитать расходники',
   reason: 'Причина',
   text: 'Текст',
   title: 'Заголовок',
+  caption: 'Подпись',
   content: 'Текст',
   steps: 'Шаги',
   dayOffset: 'День',
@@ -47,6 +61,15 @@ const FIELD_LABELS: Record<string, string> = {
   timezone: 'Часовой пояс',
   workdayStart: 'Начало рабочего дня',
   workdayEnd: 'Конец рабочего дня',
+  cancellation: 'Отмена и предоплата',
+  freeHours: 'Бесплатная отмена, часов',
+  lateRetainPercent: 'Удержание при поздней отмене, %',
+  noShowRetainPercent: 'Удержание при неявке, %',
+  autoRetain: 'Удерживать автоматически',
+  reviewLinks: 'Ссылки на отзывы',
+  yandex: 'Яндекс Карты',
+  twogis: '2ГИС',
+  google: 'Google',
   aftercareHour: 'Час отправки памяток',
   reminderHoursBefore: 'За сколько часов напоминать',
   reminderOffsets: 'Напоминания',
@@ -54,6 +77,8 @@ const FIELD_LABELS: Record<string, string> = {
   initialQuantity: 'Начальный остаток',
   from: 'Начало периода',
   to: 'Конец периода',
+  dateFrom: 'Даты с',
+  dateTo: 'Даты по',
   limit: 'Лимит',
   offset: 'Смещение',
   sku: 'Артикул',
@@ -83,6 +108,7 @@ const FIELD_LABELS: Record<string, string> = {
   priceMax: 'Максимальная цена',
   photos: 'Фото',
   variants: 'Варианты',
+  masterPrices: 'Цены мастеров',
   imageUrl: 'Картинка',
   imagePrompt: 'Описание картинки',
   prompt: 'Описание картинки',
@@ -92,12 +118,18 @@ const FIELD_LABELS: Record<string, string> = {
   thicknessMm: 'Толщина',
   stone: 'Камень',
   supplier: 'Поставщик',
+  unitCost: 'Цена закупки за штуку',
+  search: 'Поиск',
+  pos: 'Касса',
+  sendReceipt: 'Отправлять чек клиенту в Telegram',
   size: 'Размер',
   serviceIds: 'Подходящие услуги',
   variantId: 'Размер',
   lines: 'Размеры',
   description: 'Описание',
   freshProcedure: 'Свежий прокол / свежее тату',
+  healingCheckDays: 'Спросить, как заживает',
+  jewelryChangeWeeks: 'Напомнить о замене украшения',
   section: 'Раздел',
   serviceCategory: 'Раздел услуг',
   ids: 'Категории',
@@ -107,6 +139,34 @@ const FIELD_LABELS: Record<string, string> = {
   presenceStatus: 'Наличие',
   counts: 'Пересчёт',
   presence: 'Наличие',
+  onlineBooking: 'Онлайн-запись',
+  enabled: 'Включено',
+  leadMinutes: 'Запись не раньше чем через, мин',
+  horizonDays: 'Запись вперёд, дней',
+  holdMinutes: 'Время на оплату предоплаты, мин',
+  stepMinutes: 'Шаг времени записи, мин',
+  confirmationHours: 'Отклонять неподтверждённые через, ч',
+  variant: 'Вариант',
+  comment: 'Комментарий',
+  bonus: 'Бонусы',
+  certificates: 'Сертификаты',
+  code: 'Код сертификата',
+  recipientName: 'Кому',
+  expiresAt: 'Действует до',
+  marketingOptOut: 'Не присылать новости',
+  segment: 'Получатели',
+  button: 'Кнопка',
+  url: 'Ссылка',
+  at: 'Время отправки',
+  lastVisitMonthsAgoMin: 'Последний визит — от, месяцев назад',
+  lastVisitMonthsAgoMax: 'Последний визит — до, месяцев назад',
+  neverVisited: 'Ещё не были в студии',
+  categories: 'Разделы услуг',
+  masterIds: 'Мастера',
+  minVisits: 'Визитов не меньше',
+  birthdayMonth: 'Месяц рождения',
+  hasBonuses: 'Есть бонусы',
+  createdWithinDays: 'Новые клиенты, дней',
 };
 
 function fieldLabel(path: PropertyKey[]): string | null {
@@ -205,6 +265,14 @@ export const calendarDate = z
   .string()
   .trim()
   .refine((v) => v === '' || isValidCalendarDate(v), { message: 'дата должна быть в формате ГГГГ-ММ-ДД' })
+  .nullish()
+  .transform((v) => (v === '' ? null : v));
+
+/** A birthday `YYYY-MM-DD`: a real date, or day and month with the year 1900 («year unknown», 29 February too). */
+export const birthdayDate = z
+  .string()
+  .trim()
+  .refine((v) => v === '' || isStoredBirthday(v), { message: 'дата должна быть в формате ГГГГ-ММ-ДД' })
   .nullish()
   .transform((v) => (v === '' ? null : v));
 

@@ -91,6 +91,23 @@ final class CartStoreServiceTests: XCTestCase {
         XCTAssertEqual(cart.subtotal, 2 * 2_500 + 4_500 + 4_000)
     }
 
+    func testAddServiceTakesTheMastersOwnPrice() throws {
+        let cart = try makeCart()
+        var priced = nipple
+        priced.masterPrices = [
+            ServiceMasterPrice(employeeId: 9, price: 3_000, variants: [ServiceMasterVariantPrice(name: "Два", price: 5_000)]),
+        ]
+
+        cart.add(service: priced, variant: priced.variants[1], masterId: 9)
+        cart.add(service: priced, variant: priced.variants[0], masterId: 9)
+        cart.add(service: priced, masterId: 9)
+        cart.add(service: priced, masterId: 2)
+
+        XCTAssertEqual(cart.lines.map(\.unitPrice), [5_000, 2_500, 3_000, 2_500], "own variant, catalog variant, own, catalog")
+        XCTAssertEqual(cart.quantity(ofService: 5, named: "Соски — Два"), 1)
+        XCTAssertEqual(cart.quantity(ofService: 5, named: "Соски"), 2)
+    }
+
     // MARK: - prefill(from:)
 
     func testPrefillSplitsServiceLinesWhenTheyAddUpToThePrice() throws {
@@ -253,20 +270,23 @@ final class POSServiceCatalogAndHistoryTests: XCTestCase {
         XCTAssertEqual(single.map(\.group), ["Тату", "Коррекция и удаление"])
     }
 
-    func testRowsSplitTilesIntoFixedWidthRows() {
-        let services = (1...5).map { service($0, "Услуга \($0)", .piercing, group: nil) }
-
-        XCTAssertEqual(POSServiceCatalog.rows(services, columns: 2).map { $0.map(\.id) }, [[1, 2], [3, 4], [5]])
-        XCTAssertTrue(POSServiceCatalog.rows([], columns: 2).isEmpty)
-        XCTAssertTrue(POSServiceCatalog.rows(services, columns: 0).isEmpty)
-    }
-
     func testPriceHintOnlyForVariablePriceWithoutVariant() {
         var fixed = service(1, "Мочка", .piercing, group: "Ухо")
         XCTAssertNil(POSServiceCatalog.priceHint(for: fixed, variant: nil))
         fixed.priceFrom = true
         XCTAssertNotNil(POSServiceCatalog.priceHint(for: fixed, variant: nil))
         XCTAssertNil(POSServiceCatalog.priceHint(for: fixed, variant: ServiceVariant(name: "Два", price: 2_000, durationMin: nil)))
+    }
+
+    func testPriceHintNamesTheMastersPriceAndTheirOwnRange() {
+        var lobe = service(1, "Мочка", .piercing, group: "Ухо")
+        lobe.masterPrices = [ServiceMasterPrice(employeeId: 9, price: 1_800, priceMax: 2_500)]
+
+        XCTAssertNil(POSServiceCatalog.priceHint(for: lobe, variant: nil, masterId: 2), "a fixed catalog price")
+        XCTAssertEqual(
+            POSServiceCatalog.priceHint(for: lobe, variant: nil, masterId: 9),
+            "Добавлено по \(Money.format(1_800)) — итоговую цену можно изменить в чеке"
+        )
     }
 
     func testHistorySummaryLeavesRefundsOutAndCountsThemSeparately() {

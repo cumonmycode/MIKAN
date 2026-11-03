@@ -8,6 +8,8 @@ export type ErrorCode =
   | 'schedule_conflict'
   | 'rate_limited'
   | 'upstream_error'
+  /** A spending limit ran out (the AI budget of the month, the Polza balance or key limit). */
+  | 'payment_required'
   | 'payment_provider_error'
   | 'internal';
 
@@ -21,6 +23,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   schedule_conflict: 409,
   rate_limited: 429,
   upstream_error: 502,
+  payment_required: 402,
   payment_provider_error: 502,
   internal: 500,
 };

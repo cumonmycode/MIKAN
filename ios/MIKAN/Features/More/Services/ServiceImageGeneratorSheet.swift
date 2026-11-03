@@ -196,6 +196,29 @@ struct ServiceImageGeneratorSheet: View {
     }
 }
 
+// MARK: - Cover generation
+
+/// How to read the outcome of an AI cover generation request.
+nonisolated enum ServiceImageGeneration {
+    /// The service has a picture other than the one it had when the generation started.
+    static func hasNewPicture(_ service: Service?, baseline: String?) -> Bool {
+        guard let current = service?.imageUrl.nonEmpty else { return false }
+        return current != baseline.nonEmpty
+    }
+
+    /// `409` because a generation for this service is still running (a missing AI key is a `409` too, with another message).
+    static func isAlreadyGenerating(_ error: any Error) -> Bool {
+        guard let error = error as? APIError, error.status == 409 else { return false }
+        return error.message.localizedCaseInsensitiveContains("генерируется")
+    }
+
+    /// The request broke on the way (timeout, dropped connection, app in background): the server may still finish.
+    static func mayStillFinish(_ error: any Error) -> Bool {
+        guard let error = error as? APIError, case .transport = error else { return false }
+        return true
+    }
+}
+
 #if DEBUG
 #Preview {
     ServiceImageGeneratorSheet(service: PreviewData.nipple) { _ in }

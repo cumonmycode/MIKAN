@@ -15,13 +15,15 @@ final class CartStore {
     var client: ClientRef?
     /// Appointment this receipt pays for (kept whole: checkout may need to complete it first).
     private(set) var appointment: Appointment?
+    /// Who opened the receipt: without a visit, services take their prices when they are a master
+    /// (`ReceiptPricing.masterId`). `nil` for a receipt not loaded from the server.
+    private(set) var openedBy: EmployeeRef?
     var appointmentId: Int? { appointment?.id }
     var discount = 0
     /// Prepayment held for the appointment (received earlier); `depositApplied` of it is counted in this receipt.
     private(set) var deposit = 0
     var note = ""
-    var isCheckoutPresented = false
-    /// Bumped after every successful sale, so the POS hub can reload its lists and pop the receipt screen.
+    /// Bumped after every successful sale, so the POS hub reloads its lists.
     private(set) var salesCompleted = 0
 
     /// One method (amount computed from the total) or a manual split. New receipts start with the last used method.
@@ -30,6 +32,15 @@ final class CartStore {
     var manualSplit = PaymentSplit()
     /// Cash handed over by the client (single cash mode only); used for the change, never sent to the server.
     var cashReceived: Int?
+
+    /// Bonuses the cashier asked to spend; checkout applies at most `bonusLimit` of them (see `bonusApplied`).
+    var bonusRequested = 0
+    /// Gift certificates spent at this checkout, in the order they were added.
+    private(set) var certificateCharges: [CertificateCharge] = []
+    /// The studio's loyalty rules (`GET /settings/retention`); `nil` until checkout loads them.
+    private(set) var loyaltyRules: CheckoutLoyaltyRules?
+    /// The bonuses and birthday discount of the cart's client, loaded at checkout.
+    private(set) var clientLoyalty: CartClientLoyalty?
 
     /// `POST /appointments/:id/complete` before the sale (only while the appointment is not completed yet).
     var completesAppointment = true
@@ -50,7 +61,8 @@ final class CartStore {
     var itemCount: Int { lines.reduce(0) { $0 + $1.quantity } }
     var subtotal: Int { lines.reduce(0) { $0 + $1.total } }
     var total: Int { CheckoutRules.total(subtotal: subtotal, discount: discount) }
-    var isDiscountValid: Bool { CheckoutRules.isDiscountValid(discount, subtotal: subtotal) }
+    /// The discount never applies to a gift certificate sold: at most the subtotal of the other lines.
+    var isDiscountValid: Bool { CheckoutRules.isDiscountValid(discount, subtotal: discountableSubtotal) }
 
     /// Nothing worth keeping: no lines, no client, no appointment and no note.
     var isBlank: Bool { lines.isEmpty && client == nil && appointment == nil && note.nonEmpty == nil }
@@ -59,25 +71,35 @@ final class CartStore {
 
     /// Part of the held prepayment counted in this receipt: `min(held, total)`.
     var depositApplied: Int { CheckoutRules.depositApplied(deposit, total: total) }
-    /// What the client pays now: total minus the applied prepayment. The payment methods cover only this.
-    var amountDue: Int { CheckoutRules.amountDue(total: total, deposit: deposit) }
+    /// What is left after the prepayment: bonuses, certificates and the payment methods cover it.
+    var amountAfterDeposit: Int { CheckoutRules.amountDue(total: total, deposit: deposit) }
+    /// What the client pays now by the payment methods: total minus the prepayment, bonuses and certificates.
+    var amountDue: Int { max(0, amountAfterDeposit - creditsApplied) }
     /// Prepayment that stays held for the appointment after this receipt (more was paid than the receipt costs).
     var depositRemainder: Int { CheckoutRules.depositRemainder(deposit, total: total) }
-    /// Nothing is left to pay now: the prepayment covers the whole receipt.
-    var isPaidByDeposit: Bool { depositApplied > 0 && amountDue == 0 }
+    /// The prepayment alone covers the whole receipt.
+    var isPaidByDeposit: Bool { depositApplied > 0 && amountAfterDeposit == 0 }
+    /// Nothing is left for the payment methods: the prepayment, bonuses and certificates cover the whole receipt.
+    var isPaidInFull: Bool { amountDue == 0 && depositApplied + creditsApplied > 0 }
 
-    /// How `amountDue` is paid now (the prepayment is not part of it). Empty when the prepayment covers everything
-    /// (checkout then hides the methods, so amounts typed earlier in «Разделить» must not count).
+    /// How `amountDue` is paid now (the prepayment, bonuses and certificates are not part of it). Empty when they
+    /// cover everything (checkout then hides the methods, so amounts typed earlier in «Разделить» must not count).
     var split: PaymentSplit {
-        guard !isPaidByDeposit else { return PaymentSplit() }
+        guard !isPaidInFull else { return PaymentSplit() }
         return switch paymentMode {
-        case .single(let method): PaymentSplit.single(method, total: total, deposit: deposit)
+        case .single(let method): PaymentSplit.single(method, due: amountDue)
         case .split: manualSplit
         }
     }
 
-    /// Payments sent with the sale: the split plus the applied prepayment (always sent, 0 when none).
-    var payments: Payments { split.payments(deposit: depositApplied) }
+    /// Payments sent with the sale: the split, the applied prepayment (always sent, 0 when none), bonuses and the
+    /// certificates spent.
+    var payments: Payments {
+        CheckoutCredits.payments(
+            split: split, deposit: depositApplied, bonus: bonusApplied,
+            charges: certificateCharges, amounts: certificateAmounts
+        )
+    }
 
     /// Positive: still to distribute; negative: overpaid. Always 0 in single mode.
     var remaining: Int { split.remaining(for: amountDue) }
@@ -103,7 +125,9 @@ final class CartStore {
             linesValid: lines.allSatisfy(\.isValid),
             subtotal: subtotal,
             discount: discount,
+            discountLimit: discountableSubtotal,
             deposit: deposit,
+            credits: creditsApplied,
             split: split
         ) && isCashReceivedEnough
     }
@@ -139,6 +163,33 @@ final class CartStore {
         }
     }
 
+    // MARK: Bonuses and gift certificates (see `CartStore+Loyalty.swift`)
+
+    /// `nil` — unknown (not loaded, or the server did not answer): no bonuses are offered.
+    func setLoyaltyRules(_ rules: CheckoutLoyaltyRules?) {
+        loyaltyRules = rules
+    }
+
+    /// The client's bonuses as `GET /clients/:id` reported them. Bonuses asked for another client are dropped.
+    func setClientLoyalty(_ loyalty: ClientLoyalty?, for clientId: Int) {
+        if clientLoyalty?.clientId != clientId { bonusRequested = 0 }
+        clientLoyalty = loyalty.map { CartClientLoyalty(clientId: clientId, loyalty: $0) }
+    }
+
+    /// Adds a looked-up certificate taking `amount` (a second lookup of the same code updates it instead).
+    func addCertificateCharge(_ certificate: GiftCertificate, amount: Int) {
+        let charge = CertificateCharge(certificate: certificate, amount: amount)
+        if let index = certificateCharges.firstIndex(where: { $0.code == charge.code }) {
+            certificateCharges[index] = charge
+        } else {
+            certificateCharges.append(charge)
+        }
+    }
+
+    func removeCertificateCharge(code: String) {
+        certificateCharges.removeAll { $0.code == code }
+    }
+
     // MARK: Appointment
 
     /// The appointment still has to be completed: checkout shows the «Запись» section.
@@ -162,99 +213,7 @@ final class CartStore {
         appointment = completed
     }
 
-    // MARK: Lines
-
-    /// Units of the product in all its sizes (the catalog tile badge).
-    func quantity(ofProduct productId: Int) -> Int {
-        lines.filter { $0.productId == productId }.reduce(0) { $0 + $1.quantity }
-    }
-
-    /// Units of one size, summed over its lines (an edited price makes a separate line of the same size).
-    func quantity(ofVariant variantId: Int) -> Int {
-        lines.filter { $0.variantId == variantId }.reduce(0) { $0 + $1.quantity }
-    }
-
-    func quantity(ofService serviceId: Int) -> Int {
-        lines.filter { $0.kind == .service(id: serviceId) }.reduce(0) { $0 + $1.quantity }
-    }
-
-    /// Adds one of a size at its catalog price. A product with one size may come without `variant` (its only size
-    /// is sold); a product with several sizes needs one, otherwise nothing is added and the result is `false`.
-    /// The same size at the same price bumps the quantity; another size, or a line repriced in the receipt,
-    /// is a separate line.
-    @discardableResult
-    func add(product: Product, variant: ProductVariant? = nil) -> Bool {
-        guard let size = Self.size(of: product, variant) else { return false }
-        let line = CartLine(
-            kind: .product(id: product.id, variantId: size.id, stock: size.quantity),
-            name: product.lineName(variant: size),
-            sizeName: size.name,
-            unitPrice: product.price(of: size),
-            productKind: product.kind
-        )
-        if let index = lines.firstIndex(where: { $0.isSameSize(as: line) && $0.unitPrice == line.unitPrice }) {
-            lines[index].quantity += 1
-        } else {
-            lines.append(line)
-        }
-        return true
-    }
-
-    /// The size to sell: the product's own copy of `variant` (fresh stock), or its only size.
-    private static func size(of product: Product, _ variant: ProductVariant?) -> ProductVariant? {
-        guard let variant else { return product.hasSeveralSizes ? nil : product.variants.first }
-        return product.variant(id: variant.id)
-    }
-
-    // MARK: Stock
-
-    /// Units of the line's size in the whole receipt.
-    func sizeQuantity(of line: CartLine) -> Int {
-        lines.filter { $0.isSameSize(as: line) }.reduce(0) { $0 + $1.quantity }
-    }
-
-    /// How many the line may hold so that all lines of its size stay within the stock; `nil` for services.
-    func stockLimit(for line: CartLine) -> Int? {
-        guard let stock = line.stock else { return nil }
-        return stock - (sizeQuantity(of: line) - line.quantity)
-    }
-
-    /// All lines of the line's size together ask for more than its stock (the server answers `insufficient_stock`).
-    func exceedsStock(_ line: CartLine) -> Bool {
-        guard let stock = line.stock else { return false }
-        return sizeQuantity(of: line) > stock
-    }
-
-    /// «На складе только 1 шт размера 8 мм» under every line of a size that is short; `nil` otherwise.
-    func stockWarning(for line: CartLine) -> String? {
-        guard let stock = line.stock else { return nil }
-        return ReceiptStock.warning(
-            stock: stock, inReceipt: sizeQuantity(of: line), lineQuantity: line.quantity, sizeName: line.sizeName
-        )
-    }
-
-    /// Adds a catalog service (or one of its variants) at its catalog price. Repeating the same service
-    /// at the same price bumps the quantity; a line whose price was edited in the receipt stays separate.
-    func add(service: Service, variant: ServiceVariant? = nil) {
-        let line = CartLine(
-            kind: .service(id: service.id),
-            name: service.lineName(variant: variant),
-            unitPrice: variant?.price ?? service.price
-        )
-        if let index = lines.firstIndex(where: { $0.kind == line.kind && $0.name == line.name && $0.unitPrice == line.unitPrice }) {
-            lines[index].quantity += 1
-        } else {
-            lines.append(line)
-        }
-    }
-
-    func addCustomService(name: String, price: Int) {
-        lines.append(CartLine(kind: .service(id: nil), name: name.trimmed, unitPrice: max(0, price)))
-    }
-
-    func remove(at offsets: IndexSet) {
-        lines.remove(atOffsets: offsets)
-    }
+    // MARK: Lines (see `CartStore+Lines.swift`)
 
     /// Fills the cart from an appointment: its service lines (see `serviceLines(for:)`), the client,
     /// the appointment link and its held prepayment (applied up to the receipt total).
@@ -290,13 +249,15 @@ final class CartStore {
         let isSameReceipt = receipt.id == receiptId
         let kept = (
             paymentMode: paymentMode, manualSplit: manualSplit, cashReceived: cashReceived,
-            completesAppointment: completesAppointment, sendsAftercare: sendsAftercare
+            completesAppointment: completesAppointment, sendsAftercare: sendsAftercare,
+            bonusRequested: bonusRequested, certificateCharges: certificateCharges, clientLoyalty: clientLoyalty
         )
         clear()
         receiptId = receipt.id
         lines = receipt.items.compactMap(CartLine.init(item:))
         client = receipt.client
         appointment = receipt.appointment
+        openedBy = receipt.openedBy
         deposit = max(0, receipt.appointment?.deposit ?? 0)
         discount = receipt.discount
         note = receipt.note ?? ""
@@ -307,16 +268,21 @@ final class CartStore {
         cashReceived = kept.cashReceived
         completesAppointment = kept.completesAppointment
         sendsAftercare = kept.sendsAftercare
+        // Bonuses and certificates chosen to pay stay chosen (they are not part of the open receipt).
+        bonusRequested = kept.bonusRequested
+        certificateCharges = kept.certificateCharges
+        clientLoyalty = kept.clientLoyalty
     }
 
-    /// The whole receipt for `PUT /receipts/:id`. A discount above the lines (being typed, or lines removed) is
-    /// saved capped, so the save still goes through; checkout keeps flagging it.
+    /// The whole receipt for `PUT /receipts/:id`, a gift certificate to sell included. A discount above the lines
+    /// it may cover (being typed, or lines removed; never a certificate) is saved capped, so the save still goes
+    /// through; checkout keeps flagging it.
     func makeReceiptBody() -> ReceiptBody {
         ReceiptBody(
             appointmentId: appointmentId,
             clientId: client?.id,
             items: lines.map(\.body),
-            discount: min(max(0, discount), subtotal),
+            discount: min(max(0, discount), discountableSubtotal),
             note: note.nonEmpty
         )
     }
@@ -363,6 +329,7 @@ final class CartStore {
         lines = []
         client = nil
         appointment = nil
+        openedBy = nil
         discount = 0
         deposit = 0
         note = ""
@@ -371,6 +338,9 @@ final class CartStore {
         cashReceived = nil
         completesAppointment = true
         sendsAftercare = false
+        bonusRequested = 0
+        certificateCharges = []
+        clientLoyalty = nil
     }
 
     /// The last used method, unless the studio no longer takes it (card).

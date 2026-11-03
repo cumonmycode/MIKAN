@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTestApp, make, type TestApp } from './helpers.js';
+import { createTestApp, make, openShift, type TestApp } from './helpers.js';
 
 type Json = Record<string, any>;
 
@@ -9,6 +9,7 @@ describe('deleting products and the unit cost of receipts', () => {
 
   beforeEach(async () => {
     t = await createTestApp();
+    await openShift(t);
     labret = await make(t, '/api/products', {
       kind: 'jewelry', name: 'Лабрет', price: 1500, cost: 500,
       variants: [{ name: '6 мм', initialQuantity: 2 }, { name: '8 мм', cost: 700, initialQuantity: 1 }],

@@ -30,11 +30,15 @@ struct CategoriesEditorView: View {
     @State private var nameText = ""
     @State private var merging: CatalogCategory?
     @State private var deleting: CatalogCategory?
+    /// The product category whose items are open.
+    @State private var opened: CatalogCategory?
     @State private var isWorking = false
     @State private var errorMessage: String?
 
     private var scopes: [ServiceCategory?] { CategoryEditing.scopes(of: section) }
     private var isSearching: Bool { !search.trimmed.isEmpty }
+    /// Product categories open their items on a tap; service groups are renamed (services are edited in their cards).
+    private var opensItems: Bool { section.productKind != nil }
 
     var body: some View {
         NavigationStack {
@@ -44,6 +48,9 @@ struct CategoriesEditorView: View {
                 }
             }
             .environment(\.editMode, $editMode)
+            .navigationDestination(item: $opened) { category in
+                CategoryItemsView(category: category, onChange: itemsChanged)
+            }
             .searchable(text: $search, prompt: "Найти категорию")
             .overlay {
                 RemoteStateOverlay(remote: categories, retry: load)
@@ -107,14 +114,17 @@ struct CategoriesEditorView: View {
             }
         } footer: {
             if scope == scopes.last, !isSearching {
-                Text("Порядок категорий — тот же на складе, в кассе и у бота. Удерживайте строку и перетащите её или нажмите «Порядок».")
+                Text(opensItems
+                    ? "Нажмите на категорию, чтобы добавить в неё позиции или убрать их. Порядок категорий — тот же на складе, в кассе и у бота: удерживайте строку и перетащите её или нажмите «Порядок»."
+                    : "Порядок категорий — тот же на складе, в кассе и у бота. Удерживайте строку и перетащите её или нажмите «Порядок».")
             }
         }
     }
 
     private func row(_ category: CatalogCategory) -> some View {
         Button {
-            startRenaming(category)
+            guard editMode == .inactive else { return }
+            if opensItems { opened = category } else { startRenaming(category) }
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -127,8 +137,8 @@ struct CategoriesEditorView: View {
                 }
                 Spacer(minLength: 8)
                 if editMode == .inactive {
-                    Image(systemName: "pencil")
-                        .font(.footnote)
+                    Image(systemName: opensItems ? "chevron.right" : "pencil")
+                        .font(.footnote.weight(opensItems ? .semibold : .regular))
                         .foregroundStyle(.tertiary)
                         .accessibilityHidden(true)
                 }
@@ -136,7 +146,11 @@ struct CategoriesEditorView: View {
             .contentShape(.rect)
         }
         .tint(.primary)
-        .accessibilityHint("Переименовать")
+        .accessibilityHint(opensItems ? "Открыть позиции категории" : "Переименовать")
+        .swipeActions(edge: .leading) {
+            Button("Переименовать", systemImage: "pencil") { startRenaming(category) }
+                .tint(.blue)
+        }
         .swipeActions(edge: .trailing) {
             Button("Удалить", systemImage: "trash", role: .destructive) { deleting = category }
             Button("Объединить", systemImage: "arrow.triangle.merge") { merging = category }
@@ -144,6 +158,9 @@ struct CategoriesEditorView: View {
                 .disabled(targets(for: category).isEmpty)
         }
         .contextMenu {
+            if opensItems {
+                Button("Позиции категории", systemImage: "list.bullet") { opened = category }
+            }
             Button("Переименовать", systemImage: "pencil") { startRenaming(category) }
             Button("Объединить с…", systemImage: "arrow.triangle.merge") { merging = category }
                 .disabled(targets(for: category).isEmpty)
@@ -208,6 +225,12 @@ struct CategoriesEditorView: View {
         reference.replaceCategories(items, section: section)
     }
 
+    /// Items moved in or out of a category: the counts here and the warehouse list are out of date.
+    private func itemsChanged() {
+        onChange()
+        Task { await load() }
+    }
+
     /// Runs one change; a failure reloads the list from the server, so nothing optimistic stays behind.
     private func perform(_ change: @escaping @MainActor () async throws -> Void) {
         isWorking = true
@@ -250,6 +273,8 @@ struct CategoriesEditorView: View {
             perform {
                 let created = try await api.createCategory(body)
                 apply(CategoryEditing.upserting(created, in: categories.value ?? []))
+                // A new product category is empty: open it, so items can be added right away.
+                if opensItems { opened = created }
             }
         case .rename(let category):
             guard name != category.name else { return }

@@ -8,6 +8,7 @@ import { clientFullName, type ClientRow, type ClientStats } from '../lib/seriali
 import { normalizeSearchTerm, searchKey } from '../lib/text.js';
 import { toIso } from '../lib/time.js';
 import { likePattern } from '../lib/validation.js';
+import { cancelPendingFollowUps, FOLLOW_UP_SKIP } from './follow-ups.js';
 import { getClientRow } from './refs.js';
 import { syncRemindersForClient } from './scheduling.js';
 
@@ -22,12 +23,18 @@ export interface ClientInput {
   notes?: string | null;
   source?: string | null;
   botEnabled?: boolean;
+  /** No news and offers (campaigns, birthday, win-back); service messages still go. */
+  marketingOptOut?: boolean;
   archived?: boolean;
 }
 
+/** The longest `notes` a card may hold (the app's edit form sends them back). */
+export const CLIENT_NOTES_MAX = 5000;
+
 type SearchFields = Pick<ClientRow, 'name' | 'lastName' | 'phone' | 'instagram' | 'telegramNick' | 'telegramUsername'>;
 
-function derived(row: SearchFields) {
+/** `nameSort` and `searchText` of a card with these fields. */
+export function derivedClientFields(row: SearchFields) {
   const fullName = clientFullName(row);
   return {
     nameSort: searchKey(fullName),
@@ -75,11 +82,12 @@ export function createClient(db: DbOrTx, input: ClientInput & { name: string }, 
     .insert(clients)
     .values({
       ...base,
-      ...derived(base),
+      ...derivedClientFields(base),
       birthday: input.birthday ?? null,
       notes: input.notes ?? null,
       source: input.source ?? null,
       botEnabled: input.botEnabled ?? true,
+      marketingOptOut: input.marketingOptOut ?? false,
       archived: false,
       telegramChatId: extra.telegramChatId ?? null,
       createdAt: now,
@@ -111,21 +119,24 @@ export function updateClient(db: DbOrTx, id: number, input: ClientInput): Client
     telegramNick: input.telegramNick === undefined ? current.telegramNick : input.telegramNick,
     telegramUsername: current.telegramUsername,
   };
-  return db
+  const row = db
     .update(clients)
     .set({
       ...next,
-      ...derived(next),
+      ...derivedClientFields(next),
       birthday: input.birthday === undefined ? current.birthday : input.birthday,
       notes: input.notes === undefined ? current.notes : input.notes,
       source: input.source === undefined ? current.source : input.source,
       botEnabled: input.botEnabled ?? current.botEnabled,
+      marketingOptOut: input.marketingOptOut ?? current.marketingOptOut,
       archived: input.archived ?? current.archived,
       updatedAt: Date.now(),
     })
     .where(eq(clients.id, id))
     .returning()
     .get();
+  if (current.botEnabled && !row.botEnabled) cancelPendingFollowUps(db, [id], FOLLOW_UP_SKIP.botOff);
+  return row;
 }
 
 export function searchClients(db: DbOrTx, f: { search?: string; archived: boolean; limit: number; offset: number }) {
@@ -144,33 +155,49 @@ export function searchClients(db: DbOrTx, f: { search?: string; archived: boolea
 }
 
 export function clientStats(db: DbOrTx, clientId: number): ClientStats {
+  return clientStatsByIds(db, [clientId]).get(clientId)!;
+}
+
+/** `Client.stats` of several clients in three queries (every id gets an entry, zeros when nothing is found). */
+export function clientStatsByIds(db: DbOrTx, clientIds: readonly number[]): Map<number, ClientStats> {
+  const ids = [...new Set(clientIds)];
+  const result = new Map<number, ClientStats>(
+    ids.map((id) => [id, { visits: 0, totalSpent: 0, lastVisitAt: null, upcomingAppointments: 0 }]),
+  );
+  if (ids.length === 0) return result;
   const visits = db
-    .select({ n: count(), last: max(appointments.startsAt) })
+    .select({ id: appointments.clientId, n: count(), last: max(appointments.startsAt) })
     .from(appointments)
-    .where(and(eq(appointments.clientId, clientId), eq(appointments.status, 'completed')))
-    .get();
+    .where(and(inArray(appointments.clientId, ids), eq(appointments.status, 'completed')))
+    .groupBy(appointments.clientId)
+    .all();
+  // What the client kept of each sale: a partial refund takes off what it returned, a full one everything.
   const spent = db
-    .select({ v: sql<number>`coalesce(sum(${sales.total}), 0)` })
+    .select({ id: sales.clientId, v: sql<number>`coalesce(sum(${sales.total} - ${sales.refundedTotal}), 0)` })
     .from(sales)
-    .where(and(eq(sales.clientId, clientId), eq(sales.status, 'completed')))
-    .get();
+    .where(and(inArray(sales.clientId, ids), eq(sales.status, 'completed')))
+    .groupBy(sales.clientId)
+    .all();
   const upcoming = db
-    .select({ n: count() })
+    .select({ id: appointments.clientId, n: count() })
     .from(appointments)
     .where(
       and(
-        eq(appointments.clientId, clientId),
+        inArray(appointments.clientId, ids),
         inArray(appointments.status, ['scheduled', 'confirmed']),
         gte(appointments.startsAt, Date.now()),
       ),
     )
-    .get();
-  return {
-    visits: visits?.n ?? 0,
-    totalSpent: spent?.v ?? 0,
-    lastVisitAt: toIso(visits?.last ?? null),
-    upcomingAppointments: upcoming?.n ?? 0,
+    .groupBy(appointments.clientId)
+    .all();
+  const patch = (id: number | null, values: Partial<ClientStats>) => {
+    const current = id != null ? result.get(id) : undefined;
+    if (current) result.set(id!, { ...current, ...values });
   };
+  for (const v of visits) patch(v.id, { visits: v.n, lastVisitAt: toIso(v.last ?? null) });
+  for (const s of spent) patch(s.id, { totalSpent: s.v });
+  for (const u of upcoming) patch(u.id, { upcomingAppointments: u.n });
+  return result;
 }
 
 export function clientHistory(db: DbOrTx, clientId: number) {
@@ -212,10 +239,13 @@ export function findClientByChat(db: DbOrTx, chatId: number): ClientRow | null {
 export function linkTelegram(db: DbOrTx, clientId: number, chatId: number, username: string | null): ClientRow {
   return db.transaction((tx) => {
     const now = Date.now();
-    tx.update(clients)
+    const unlinked = tx
+      .update(clients)
       .set({ telegramChatId: null, updatedAt: now })
       .where(and(eq(clients.telegramChatId, chatId), ne(clients.id, clientId)))
-      .run();
+      .returning({ id: clients.id })
+      .all();
+    cancelPendingFollowUps(tx, unlinked.map((c) => c.id), FOLLOW_UP_SKIP.unlinked);
     const current = getClientRow(tx, clientId);
     const next = { ...current, telegramUsername: username ?? current.telegramUsername };
     const row = tx
@@ -224,7 +254,7 @@ export function linkTelegram(db: DbOrTx, clientId: number, chatId: number, usern
         telegramChatId: chatId,
         telegramUsername: next.telegramUsername,
         linkToken: null,
-        ...derived(next),
+        ...derivedClientFields(next),
         updatedAt: now,
       })
       .where(eq(clients.id, clientId))

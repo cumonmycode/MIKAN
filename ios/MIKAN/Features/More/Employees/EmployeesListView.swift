@@ -4,6 +4,7 @@ struct EmployeesListView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppState.self) private var appState
     @Environment(ReferenceStore.self) private var reference
+    @Environment(\.permissions) private var permissions
     @State private var employees = Remote<[Employee]>()
     @State private var editing: EmployeeEditTarget?
 
@@ -16,7 +17,9 @@ struct EmployeesListView: View {
                 Section {
                     ForEach(active) { employee in row(employee) }
                 } footer: {
-                    Text("У всех сотрудников одинаковые права.")
+                    Text(permissions.managesEmployees
+                        ? "Роль решает, что сотрудник может в приложении. Нажмите на сотрудника, чтобы изменить."
+                        : "Сотрудников добавляет и меняет владелец студии. Своё имя, телефон, цвет и пароль можно изменить — нажмите на себя.")
                 }
             }
             if !inactive.isEmpty {
@@ -35,8 +38,10 @@ struct EmployeesListView: View {
         .remoteErrorAlert(employees)
         .navigationTitle("Сотрудники")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Новый сотрудник", systemImage: "plus") { editing = .new }
+            if permissions.managesEmployees {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Новый сотрудник", systemImage: "plus") { editing = .new }
+                }
             }
         }
         .sheet(item: $editing) { target in
@@ -63,7 +68,7 @@ struct EmployeesListView: View {
                             Text("вы").font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    Text("@\(employee.login)").font(.subheadline).foregroundStyle(.secondary)
+                    Text("@\(employee.login) · \(employee.role.title)").font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if employee.isMaster {
@@ -73,6 +78,8 @@ struct EmployeesListView: View {
             .contentShape(.rect)
             .opacity(employee.active ? 1 : 0.55)
         }
+        // Others see the team read-only and open only their own card.
+        .disabled(!permissions.editAccess(to: employee).canEdit)
         .accessibilityElement(children: .combine)
     }
 

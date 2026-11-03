@@ -2,11 +2,33 @@ import SwiftUI
 
 struct MoreView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.permissions) private var permissions
     @State private var confirmsSignOut = false
+    /// The SMM profile switcher's state, kept here so the SMM screens survive redraws of «Ещё».
+    @State private var smmStore = SmmProfileStore()
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    NavigationLink(value: SmmRoute.home) {
+                        Label("СММ-маркетолог", systemImage: "megaphone")
+                    }
+                    .badge(appState.badges.smmReview)
+                }
+                Section("Онлайн-запись") {
+                    NavigationLink { OnlineBookingsView() } label: {
+                        Label("Онлайн-записи", systemImage: "globe")
+                    }
+                    .badge(appState.badges.onlineAwaiting)
+                    NavigationLink { WaitlistView() } label: {
+                        Label("Лист ожидания", systemImage: "hourglass")
+                    }
+                    .badge(appState.badges.waitlist)
+                    NavigationLink { BookingLinkView() } label: {
+                        Label("Ссылка для записи", systemImage: "link")
+                    }
+                }
                 Section("Бот") {
                     NavigationLink { ChatsListView() } label: {
                         Label("Чаты", systemImage: "bubble.left.and.bubble.right")
@@ -19,29 +41,40 @@ struct MoreView: View {
                     NavigationLink { ScheduledMessagesView() } label: {
                         Label("Запланированные сообщения", systemImage: "clock.badge")
                     }
-                    NavigationLink { KnowledgeListView() } label: {
-                        Label("База знаний", systemImage: "books.vertical")
-                    }
-                    NavigationLink { AftercareTemplatesView() } label: {
-                        Label("Шаблоны ухода", systemImage: "cross.case")
-                    }
-                    NavigationLink { BotTestView() } label: {
-                        Label("Проверить бота", systemImage: "sparkles")
+                    // A master does not change the bot's knowledge, memos or test it.
+                    if permissions.editsSettings {
+                        NavigationLink { KnowledgeListView() } label: {
+                            Label("База знаний", systemImage: "books.vertical")
+                        }
+                        NavigationLink { AftercareTemplatesView() } label: {
+                            Label("Шаблоны ухода", systemImage: "cross.case")
+                        }
+                        NavigationLink { BotTestView() } label: {
+                            Label("Проверить бота", systemImage: "sparkles")
+                        }
                     }
                     NavigationLink { BotSettingsView() } label: {
                         Label("Настройки бота", systemImage: "gearshape.2")
                     }
                 }
+                RetentionMoreSection()
                 Section("Студия") {
-                    NavigationLink { ReportsView() } label: {
-                        Label("Отчёты", systemImage: "chart.bar.xaxis")
+                    if permissions.seesReports {
+                        NavigationLink { ReportsView() } label: {
+                            Label("Отчёты", systemImage: "chart.bar.xaxis")
+                        }
                     }
                     NavigationLink { EmployeesListView() } label: {
                         Label("Сотрудники", systemImage: "person.3")
                     }
+                    MastersPortfolioLink()
+                    NavigationLink { PayrollView() } label: {
+                        Label("Зарплата", systemImage: "banknote")
+                    }
                     NavigationLink { StudioSettingsView() } label: {
                         Label("Настройки студии", systemImage: "building.2")
                     }
+                    AuditLogMoreLink()
                 }
                 Section("Аккаунт") {
                     if let employee = appState.employee {
@@ -49,10 +82,15 @@ struct MoreView: View {
                             InitialsAvatar(name: employee.name, color: .master(employee.color), size: 44)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(employee.name).font(.headline)
-                                Text("@\(employee.login)").font(.subheadline).foregroundStyle(.secondary)
+                                Text("@\(employee.login) · \(employee.role.title)").font(.subheadline).foregroundStyle(.secondary)
                             }
                         }
                         .accessibilityElement(children: .combine)
+                        MyScheduleLink(employee: employee)
+                        MyPortfolioLink(employee: employee)
+                    }
+                    NavigationLink { SecurityView() } label: {
+                        Label("Безопасность", systemImage: "lock.shield")
                     }
                     Button("Выйти", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                         confirmsSignOut = true
@@ -67,6 +105,10 @@ struct MoreView: View {
             }
             .auraBackground()
             .navigationTitle("Ещё")
+            .navigationDestination(for: SmmRoute.self) { route in
+                SmmRouteDestination(route: route)
+                    .environment(smmStore)
+            }
             .refreshable { await appState.refreshBadges() }
             .confirmationDialog("Выйти из аккаунта?", isPresented: $confirmsSignOut, titleVisibility: .visible) {
                 Button("Выйти", role: .destructive) { appState.signOut() }

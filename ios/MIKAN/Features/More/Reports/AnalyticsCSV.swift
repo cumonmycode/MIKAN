@@ -16,9 +16,10 @@ nonisolated enum AnalyticsCSV {
             products(a.products),
             stock(a.stock),
             deposits(a.deposits),
+            loyalty(a.loyalty),
             cash(a.cash),
             people(a),
-        ]
+        ].filter { !$0.isEmpty }
         return sections.map { $0.map(row).joined(separator: lineEnd) }.joined(separator: lineEnd + lineEnd) + lineEnd
     }
 
@@ -146,6 +147,14 @@ nonisolated enum AnalyticsCSV {
             ["Удержано", String(d.retained)],
             ["На руках на конец периода", String(d.held)],
         ]
+    }
+
+    /// Left out when the studio has no bonuses or certificates.
+    static func loyalty(_ l: AnalyticsLoyalty) -> [[String]] {
+        guard !l.isZero else { return [] }
+        let bonuses = AnalyticsLoyaltyText.bonusRows(l).map { [$0.title, String($0.amount)] }
+        let certificates = AnalyticsLoyaltyText.certificateRows(l).map { [$0.title, String($0.amount)] }
+        return [["Бонусы", "Бонусов"]] + bonuses + [[], ["Подарочные сертификаты", "₽"]] + certificates
     }
 
     private static func cash(_ c: AnalyticsCash) -> [[String]] {

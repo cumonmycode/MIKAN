@@ -5,7 +5,7 @@ import { applyBankStatus, QR_GIVE_UP_MS, QR_SETTLE_GRACE_MS, sweepQrPayments } f
 import { setStaffChatId } from '../src/domain/settings.js';
 import { formatRub } from '../src/lib/text.js';
 import { QrProviderError } from '../src/payments/qr-provider.js';
-import { createTestApp, FakeQrProvider, make, type TestApp } from './helpers.js';
+import { createTestApp, FakeQrProvider, make, openShift, type TestApp } from './helpers.js';
 
 const STAFF_CHAT = -100500;
 
@@ -19,6 +19,7 @@ describe('QR payments (SBP)', () => {
   beforeEach(async () => {
     bank = new FakeQrProvider();
     t = await createTestApp({ qr: bank });
+    await openShift(t);
     product = await make(t, '/api/products', { kind: 'jewelry', name: 'Лабрет', price: 1500, initialQuantity: 3 });
     service = await make(t, '/api/services', { name: 'Прокол мочки', category: 'piercing', price: 2500, durationMin: 30 });
     client = await make(t, '/api/clients', { name: 'Иван', phone: '+79991234567' });
@@ -155,7 +156,6 @@ describe('QR payments (SBP)', () => {
   });
 
   it('pays for an appointment and counts QR money in the shift and the report', async () => {
-    await t.api('POST', '/api/cash/shift/open', { openingCash: 5000 });
     const appt = await make(t, '/api/appointments', {
       clientId: client.id,
       masterId: 1,
@@ -170,7 +170,7 @@ describe('QR payments (SBP)', () => {
     expect((await t.api('GET', `/api/appointments/${appt.id}`)).json()).toMatchObject({ status: 'completed', saleId: sale.id });
     const shift = (await t.api('GET', '/api/cash/shift/current')).json().shift;
     expect(shift.summary).toMatchObject({ revenue: 2500, cash: 0, qr: 2500 });
-    expect(shift.expectedCash).toBe(5000);
+    expect(shift.expectedCash).toBe(0);
     const from = new Date(Date.now() - 60_000).toISOString();
     const to = new Date(Date.now() + 60_000).toISOString();
     const report = (await t.api('GET', `/api/reports/summary?from=${from}&to=${to}`)).json();

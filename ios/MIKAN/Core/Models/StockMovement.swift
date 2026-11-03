@@ -50,6 +50,8 @@ nonisolated struct StockMovement: Codable, Hashable, Identifiable, Sendable {
     let appointmentId: Int?
     /// The stock count an adjustment came from.
     var revisionId: Int?
+    /// The delivery a receipt belongs to.
+    var deliveryId: Int? = nil
     /// Rubles paid: on a `purchase`, and on a `receipt` recorded with its unit cost (`unitCost × quantity`).
     var amount: Int?
     let employee: EmployeeRef?

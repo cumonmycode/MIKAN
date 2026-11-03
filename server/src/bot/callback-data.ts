@@ -40,7 +40,23 @@ export type CallbackAction =
   /** «✅ Приду» under a reminder. */
   | { kind: 'reminderConfirm'; appointmentId: number }
   /** «🔁 Перенести» under a reminder. */
-  | { kind: 'reminderMove'; appointmentId: number };
+  | { kind: 'reminderMove'; appointmentId: number }
+  /** «👍 Всё хорошо» under a healing check-in (bot/follow-ups.ts). */
+  | { kind: 'healingOk'; appointmentId: number }
+  /** «🤔 Есть вопрос» under a healing check-in. */
+  | { kind: 'healingQuestion'; appointmentId: number }
+  /** «📅 Записаться» under a jewelry change reminder. */
+  | { kind: 'jewelryChangeBook'; appointmentId: number }
+  /** «Позже» under a jewelry change reminder. */
+  | { kind: 'jewelryChangeLater'; appointmentId: number }
+  /** «🔕 Не присылать новости» under a campaign, birthday or win-back message (bot/marketing.ts). */
+  | { kind: 'marketingOptOut' }
+  /** «🔔 Снова получать новости» under the opt-out confirmation. */
+  | { kind: 'marketingOptIn' }
+  /** «📅 Записаться» under a news message while the Mini App is not available: hands the chat to the AI. */
+  | { kind: 'marketingBook' }
+  /** «Пропустить» under the bot's birthday question (bot/birthday.ts). */
+  | { kind: 'birthdaySkip' };
 
 const CATEGORY_LETTERS: Record<ServiceCategoryKey, string> = { tattoo: 't', piercing: 'p', other: 'o' };
 const LETTER_CATEGORIES: Record<string, ServiceCategoryKey> = { t: 'tattoo', p: 'piercing', o: 'other' };
@@ -77,6 +93,22 @@ export function encodeCallback(action: CallbackAction): string {
         return `rc:${action.appointmentId}`;
       case 'reminderMove':
         return `rm:${action.appointmentId}`;
+      case 'healingOk':
+        return `ho:${action.appointmentId}`;
+      case 'healingQuestion':
+        return `hq:${action.appointmentId}`;
+      case 'jewelryChangeBook':
+        return `cb:${action.appointmentId}`;
+      case 'jewelryChangeLater':
+        return `cl:${action.appointmentId}`;
+      case 'marketingOptOut':
+        return 'mo';
+      case 'marketingOptIn':
+        return 'mi';
+      case 'marketingBook':
+        return 'mb';
+      case 'birthdaySkip':
+        return 'bs';
     }
   })();
   if (Buffer.byteLength(data) > TELEGRAM_MAX_CALLBACK_DATA) throw new Error(`callback data too long: ${data}`);
@@ -98,6 +130,16 @@ function parseServiceKey(value: string | undefined): ServiceList | null {
   return { category: LETTER_CATEGORIES[match[1]!]!, groupId: Number(match[2]) };
 }
 
+/** Buttons whose payload is a tag and an appointment id. */
+const APPOINTMENT_TAGS: Record<string, 'reminderConfirm' | 'reminderMove' | 'healingOk' | 'healingQuestion' | 'jewelryChangeBook' | 'jewelryChangeLater'> = {
+  rc: 'reminderConfirm',
+  rm: 'reminderMove',
+  ho: 'healingOk',
+  hq: 'healingQuestion',
+  cb: 'jewelryChangeBook',
+  cl: 'jewelryChangeLater',
+};
+
 /** The action of a button payload; null for anything unknown or malformed (old or forged buttons). */
 export function decodeCallback(data: string): CallbackAction | null {
   const [tag, a, b, c, ...rest] = data.split(':');
@@ -109,6 +151,14 @@ export function decodeCallback(data: string): CallbackAction | null {
       return a === undefined ? { kind: 'jewelryCategories' } : null;
     case 'sc':
       return a === undefined ? { kind: 'serviceCategories' } : null;
+    case 'mo':
+      return a === undefined ? { kind: 'marketingOptOut' } : null;
+    case 'mi':
+      return a === undefined ? { kind: 'marketingOptIn' } : null;
+    case 'mb':
+      return a === undefined ? { kind: 'marketingBook' } : null;
+    case 'bs':
+      return a === undefined ? { kind: 'birthdaySkip' } : null;
     case 'jo': {
       const list = parseJewelryKey(a);
       return list && b === undefined ? { kind: 'jewelryOpen', list } : null;
@@ -136,17 +186,15 @@ export function decodeCallback(data: string): CallbackAction | null {
       return list && index !== null && c === undefined ? { kind: 'servicePage', list, index } : null;
     }
     case 'sb':
-    case 'sj':
-    case 'rc':
-    case 'rm': {
+    case 'sj': {
       const id = int(a);
       if (id === null || b !== undefined) return null;
-      if (tag === 'sb') return { kind: 'serviceBook', serviceId: id };
-      if (tag === 'sj') return { kind: 'serviceJewelry', serviceId: id };
-      if (tag === 'rc') return { kind: 'reminderConfirm', appointmentId: id };
-      return { kind: 'reminderMove', appointmentId: id };
+      return tag === 'sb' ? { kind: 'serviceBook', serviceId: id } : { kind: 'serviceJewelry', serviceId: id };
     }
-    default:
-      return null;
+    default: {
+      const kind = tag !== undefined && Object.hasOwn(APPOINTMENT_TAGS, tag) ? APPOINTMENT_TAGS[tag] : undefined;
+      const id = int(a);
+      return kind && id !== null && b === undefined ? { kind, appointmentId: id } : null;
+    }
   }
 }

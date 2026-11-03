@@ -54,8 +54,10 @@ describe('bot AI pipeline', () => {
       expect(params).not.toHaveProperty('fallbacks');
       expect(params).not.toHaveProperty('thinking');
       expect(params.tools?.map((tool) => (tool as Anthropic.Tool).name)).toEqual([
-        'create_booking_request', 'handoff_to_staff', 'show_products', 'show_service',
-        'show_jewelry_for_service', 'find_jewelry', 'my_appointments', 'free_slots', 'reschedule_appointment',
+        'create_booking_request', 'handoff_to_staff', 'show_products', 'show_service', 'show_portfolio',
+        'show_jewelry_for_service', 'find_jewelry', 'my_appointments', 'free_slots', 'book_appointment', 'join_waitlist',
+        'reschedule_appointment',
+        'certificate_balance', 'cabinet_link',
       ]);
       const system = params.system as Anthropic.TextBlockParam[];
       expect(system[0]!.cache_control).toEqual({ type: 'ephemeral' });

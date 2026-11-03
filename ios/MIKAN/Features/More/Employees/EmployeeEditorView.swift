@@ -4,6 +4,7 @@ struct EmployeeEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(APIClient.self) private var api
     @Environment(AppState.self) private var appState
+    @Environment(\.permissions) private var permissions
 
     let employee: Employee?
     let currentEmployeeId: Int?
@@ -16,6 +17,7 @@ struct EmployeeEditorView: View {
     @State private var phone: String
     @State private var color: String
     @State private var isMaster: Bool
+    @State private var role: EmployeeRole
     @State private var active: Bool
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -31,12 +33,14 @@ struct EmployeeEditorView: View {
         _phone = State(initialValue: employee?.phone ?? "")
         _color = State(initialValue: employee?.color ?? Theme.masterPalette[0])
         _isMaster = State(initialValue: employee?.isMaster ?? true)
+        _role = State(initialValue: employee?.role ?? .defaultFor(isMaster: true))
         _active = State(initialValue: employee?.active ?? true)
     }
 
     private var isCreating: Bool { employee == nil }
     private var isSelf: Bool { employee != nil && employee?.id == currentEmployeeId }
     private var needsPassword: Bool { isCreating || changesPassword }
+    private var access: EmployeeEditAccess { permissions.editAccess(to: employee) }
 
     private var passwordValid: Bool {
         !needsPassword || password.count >= Self.minPasswordLength
@@ -61,6 +65,7 @@ struct EmployeeEditorView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textContentType(.username)
+                        .disabled(!access.account)
                     if !isCreating {
                         Toggle("Сменить пароль", isOn: $changesPassword.animation())
                     }
@@ -80,13 +85,18 @@ struct EmployeeEditorView: View {
                 }
                 Section {
                     Toggle("Мастер", isOn: $isMaster)
+                        .disabled(!access.account)
                     ColorSwatchPicker(hex: $color)
                 } header: {
                     Text("Работа")
                 } footer: {
                     Text("Мастера выбираются при записи. Цвет отмечает их записи в календаре.")
                 }
-                if !isCreating {
+                EmployeeRoleSection(role: $role, isEditable: access.role)
+                if let employee { WorkScheduleLinkSection(employee: employee) }
+                if let employee, employee.isMaster { PortfolioLinkSection(employee: employee) }
+                if let employee { PayRulesSection(employee: employee) }
+                if !isCreating, permissions.managesEmployees {
                     Section {
                         Toggle("Доступ к приложению", isOn: $active)
                             .disabled(isSelf)
@@ -107,18 +117,23 @@ struct EmployeeEditorView: View {
             }
             .interactiveDismissDisabled(isSaving)
             .errorAlert($errorMessage)
+            // A new employee's role follows «Мастер» until the owner picks another one below it.
+            .onChange(of: isMaster) { if isCreating { role = .defaultFor(isMaster: isMaster) } }
         }
     }
 
     private func save() {
-        let body = EmployeeBody(
+        let body = EmployeeBody.make(
             name: name.trimmed,
             login: login.trimmed,
             password: needsPassword ? password : nil,
-            phone: Nullable(phone.nonEmpty),
-            color: Nullable(color),
+            phone: phone.nonEmpty,
+            color: color,
             isMaster: isMaster,
-            active: isCreating ? nil : active
+            role: role,
+            active: active,
+            isCreating: isCreating,
+            access: access
         )
         isSaving = true
         Task {

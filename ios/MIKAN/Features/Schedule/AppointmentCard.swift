@@ -35,6 +35,13 @@ struct AppointmentCard: View {
                             .foregroundStyle(.green)
                     }
                 }
+                if let mark = OnlineMark.of(appointment) {
+                    Label(mark.text, systemImage: mark.symbol)
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(mark.color)
+                }
                 if let mark = DepositMark.of(appointment) {
                     Label(mark.text, systemImage: mark.symbol)
                         .labelStyle(.titleAndIcon)

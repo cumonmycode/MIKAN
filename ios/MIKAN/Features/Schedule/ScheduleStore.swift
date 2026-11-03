@@ -27,13 +27,16 @@ final class ScheduleStore {
     /// Cached ranges older than this are refetched (in the background) when shown again.
     private static let staleAfter: TimeInterval = 30
 
-    private let api: APIClient
+    let api: APIClient
     private(set) var cache: [ScheduleQuery: [Appointment]] = [:]
     private(set) var loading: Set<ScheduleQuery> = []
     private(set) var errors: [ScheduleQuery: String] = [:]
     private(set) var visibleQuery: ScheduleQuery?
     /// Master filter for «Все записи».
     var masterFilter: Int?
+    /// Today ± 7 days kept on the phone: shown at once and while offline (`ScheduleStore+Offline`).
+    @ObservationIgnored var offlineSnapshot: ScheduleSnapshot?
+    @ObservationIgnored var offlineWindowRequestedAt: Date?
 
     @ObservationIgnored private var tasks: [ScheduleQuery: (token: UUID, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private var lastUsed: [ScheduleQuery: Date] = [:]
@@ -81,6 +84,40 @@ final class ScheduleStore {
                 ? (others + [appointment]).sorted { $0.startsAt < $1.startsAt }
                 : others
         }
+        keepOffline(offlineSnapshot?.upserting(appointment))
+    }
+
+    /// The phone's copy, opened once the app is unlocked: ranges with nothing to show yet show it.
+    func restore(_ snapshot: ScheduleSnapshot) {
+        if offlineSnapshot == nil { offlineSnapshot = snapshot }
+        let offline = api.connectivity?.isOnline == false
+        let pending = loading.union(visibleQuery.map { [$0] } ?? [])
+        for query in pending where cache[query] == nil {
+            showSaved(query, offline: offline)
+        }
+    }
+
+    /// Shows the phone's copy for a range: one inside the window always, one partly inside only offline (with a note).
+    @discardableResult
+    private func showSaved(_ query: ScheduleQuery, offline: Bool) -> Bool {
+        guard let snapshot = offlineSnapshot, let saved = snapshot.appointments(for: query),
+              offline || snapshot.covers(query) else { return false }
+        cache[query] = saved
+        errors[query] = offline ? snapshot.coverageNote(for: query) : nil
+        return true
+    }
+
+    /// A failed load: offline, what is shown stays (the banner tells how old it is) or the phone's copy fills in.
+    private func showFailure(_ error: any Error, for query: ScheduleQuery) {
+        guard api.connectivity?.isOnline == false else {
+            errors[query] = error.userMessage
+            return
+        }
+        if cache[query] != nil {
+            errors[query] = nil
+        } else if !showSaved(query, offline: true) {
+            errors[query] = error.userMessage
+        }
     }
 
     private func isStale(_ query: ScheduleQuery) -> Bool {
@@ -98,6 +135,8 @@ final class ScheduleStore {
         fetchedAt = [:]
         visibleQuery = nil
         masterFilter = nil
+        offlineSnapshot = nil
+        offlineWindowRequestedAt = nil
     }
 
     // MARK: - Loading
@@ -117,6 +156,7 @@ final class ScheduleStore {
             await self.fetch(query, token: token)
         }
         tasks[query] = (token, task)
+        if cache[query] == nil { showSaved(query, offline: false) }
         return task
     }
 
@@ -129,11 +169,12 @@ final class ScheduleStore {
                 lastUsed[query] = .now
                 fetchedAt[query] = .now
                 trimCache()
+                keepOffline(offlineSnapshot?.merging(items, for: query))
             }
         } catch is CancellationError {
             // Superseded by paging or a newer refresh.
         } catch {
-            if tasks[query]?.token == token { errors[query] = error.userMessage }
+            if tasks[query]?.token == token { showFailure(error, for: query) }
         }
         if tasks[query]?.token == token {
             tasks[query] = nil

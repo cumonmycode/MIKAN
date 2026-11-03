@@ -6,6 +6,7 @@ import { badRequest, conflict, errorMessage } from '../lib/errors.js';
 import { clientFullName, type AppointmentRow, type QrPaymentRow } from '../lib/serialize.js';
 import { formatRub } from '../lib/text.js';
 import { formatHumanDateTime, formatShortDateTime } from '../lib/time.js';
+import { depositPaidPush } from '../push/staff-events.js';
 import { findChat, findClientChat, storeMessage, upsertChat } from './bot-chats.js';
 import { DEPOSIT_OPEN_STATUSES } from './deposit-ledger.js';
 import { getAppointmentRow, getClientRow, serviceLinesByAppointment } from './refs.js';
@@ -108,6 +109,7 @@ export async function announceQrDeposit(ctx: AppContext, code: QrPaymentRow): Pr
     await notifyStaff(
       ctx,
       `💳 Предоплата ${formatRub(code.amount)} по СБП получена: ${clientFullName(client)}, запись ${formatShortDateTime(appointment.startsAt, tz)}`,
+      () => depositPaidPush(ctx.db, appointment, code.amount),
     );
     if (code.error || !DEPOSIT_OPEN_STATUSES.includes(appointment.status) || !ctx.gateway.isRunning()) return;
     const chatId = findClientChat(ctx.db, client)?.chatId;

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Numeric text field that updates its binding live on every keystroke (numberPad has no return key,
-/// so `TextField(value:format:)` would only commit on focus loss).
+/// so `TextField(value:format:)` would only commit on focus loss). «Готово» above the keyboard hides it.
 struct NumberField: View {
     let title: String
     @Binding var value: Int?
@@ -30,6 +30,16 @@ struct NumberField: View {
                 .accessibilityLabel(title)
             if let suffix {
                 Text(suffix).foregroundStyle(.secondary)
+            }
+        }
+        .toolbar {
+            // Only the focused field adds the button, so a form of several fields shows one «Готово».
+            if isFocused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Готово") { isFocused = false }
+                        .fontWeight(.semibold)
+                }
             }
         }
         .onAppear { text = display(value) }

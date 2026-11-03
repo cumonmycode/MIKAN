@@ -3,7 +3,8 @@ import Foundation
 // MARK: - Clients and appointments
 
 extension APIClient {
-    func clients(search: String = "", archived: Bool = false, limit: Int = 50, offset: Int = 0) async throws -> ItemsResponse<Client> {
+    /// `GET /clients` itself; the app calls `clients(…)`, which keeps the list for offline use.
+    func fetchClients(search: String, archived: Bool, limit: Int, offset: Int) async throws -> ItemsResponse<Client> {
         try await request(.get, "clients", query: queryItems([
             "search": search.nonEmpty,
             "archived": archived ? "true" : "false",
@@ -57,10 +58,6 @@ extension APIClient {
             "status": status?.rawValue,
         ]))
         return response.items
-    }
-
-    func appointment(id: Int) async throws -> Appointment {
-        try await request(.get, "appointments/\(id)")
     }
 
     func createAppointment(_ body: AppointmentBody) async throws -> Appointment {

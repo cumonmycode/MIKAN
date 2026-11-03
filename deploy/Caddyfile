@@ -1,8 +1,14 @@
 {$DOMAIN} {
 	encode zstd gzip
 
-	# Uploads are ≤ 10 MB; leave headroom for multipart overhead.
-	request_body {
+	# Uploads are ≤ 10 MB; leave headroom for multipart overhead. The one exception is the SMM
+	# post media upload: reels shot on a phone are up to 100 MB.
+	@smmMedia path_regexp ^/api/smm/(studio|author)/posts/[^/]+/media$
+	request_body @smmMedia {
+		max_size 105MB
+	}
+	@rest not path_regexp ^/api/smm/(studio|author)/posts/[^/]+/media$
+	request_body @rest {
 		max_size 12MB
 	}
 

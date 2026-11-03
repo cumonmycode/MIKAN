@@ -1,6 +1,10 @@
 import type { Bot, Context, Keyboard } from 'grammy';
 import type { AppContext } from '../context.js';
 import { errorMessage } from '../lib/errors.js';
+import { onSmmPrivate, onSmmVoice } from '../smm/tg-handlers.js';
+import { answerBirthdayQuestion, askBirthday } from './birthday.js';
+import { sendBookingOffer } from './booking-start.js';
+import { isCabinetStart, sendCabinetLink } from './cabinet.js';
 import { handleCallback } from './callbacks.js';
 import { jewelryCategoriesMenu, sendMenu, serviceSectionsMenu } from './catalog.js';
 import { BUTTONS, mainKeyboard, staffKeyboard } from './keyboards.js';
@@ -42,6 +46,23 @@ async function fetchImage(deps: HandlerDeps, fileId: string, mediaType: PendingI
   }
 }
 
+/**
+ * The picture of a message, if it has one the bot can take: a photo or an image sent as a file, within the size limit.
+ * Not awaited by the callers: grammY handles updates one by one, so a slow download must not stall other chats.
+ */
+function messageImage(deps: HandlerDeps, message: NonNullable<Context['message']>): Promise<PendingImage | undefined> | undefined {
+  if (message.photo) {
+    const best = [...message.photo].reverse().find((s) => (s.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES);
+    return best ? fetchImage(deps, best.file_id, 'image/jpeg') : undefined;
+  }
+  const doc = message.document;
+  const mediaType = doc?.mime_type ? IMAGE_TYPES[doc.mime_type] : undefined;
+  return doc && mediaType && (doc.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES ? fetchImage(deps, doc.file_id, mediaType) : undefined;
+}
+
+/** The chat history's text of a picture the bot took. */
+const photoText = (caption: string | undefined): string => (caption ? `[Фото] ${caption}` : '[Фото]');
+
 /** What a message is, for the chat history: its text, or a label of the attachment with its caption. */
 export function describeMessage(message: Context['message']): string {
   if (!message) return '[Сообщение]';
@@ -77,8 +98,13 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   const pm = bot.chatType('private');
 
   pm.command('start', async (c) => {
-    const reply = handleStart(ctx, sender(c), String(c.match ?? ''));
+    const payload = String(c.match ?? '');
+    const reply = handleStart(ctx, sender(c), payload);
     await c.reply(reply.text, { reply_markup: keyboardFor(reply) });
+    // `/start me` (the cabinet page's «get a link»): the sign-in buttons instead of the booking offer.
+    if (isCabinetStart(payload) && reply.linked && !reply.staff) await sendCabinetLink(ctx, c.chat.id);
+    else await sendBookingOffer(ctx, c.chat.id, reply);
+    if (reply.cardLinked) await askBirthday(ctx, c.chat.id);
   });
 
   pm.on('message:contact', async (c) => {
@@ -90,7 +116,16 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
     );
     await c.reply(reply.text, { reply_markup: keyboardFor(reply) });
     // What the person asked before sharing the phone gets its answer now.
-    if (reply.linked || reply.staff) pipeline.answerPending(c.chat.id);
+    const pending = reply.linked || reply.staff ? pipeline.answerPending(c.chat.id) : null;
+    if (!reply.cardLinked) return;
+    // The birthday question comes last (after that answer, not awaited — updates are handled one by one), so a reply to
+    // the AI is never read as the birthday.
+    if (!pending) await askBirthday(ctx, c.chat.id);
+    else {
+      void pending
+        .then(() => askBirthday(ctx, c.chat.id))
+        .catch((err: unknown) => ctx.log.warn({ chatId: c.chat.id, err: errorMessage(err) }, 'birthday question failed'));
+    }
   });
 
   // Until a new chat shares its phone nothing else works: every message is answered with the request for the phone
@@ -104,7 +139,8 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
       await c.reply(PHONE_REQUIRED, { reply_markup: mainKeyboard(false) });
       return;
     }
-    await pipeline.receiveWithoutPhone(from, describeMessage(c.message));
+    const image = c.message && messageImage(deps, c.message);
+    await pipeline.receiveWithoutPhone(from, image ? photoText(c.message?.caption?.trim()) : describeMessage(c.message), image);
   });
 
   // Interactive catalogs: the keyboard buttons and /catalog open menus with inline buttons (no AI call).
@@ -116,6 +152,14 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   });
   pm.hears(BUTTONS.services, async (c) => {
     await openCatalog(deps, sender(c), BUTTONS.services, 'services');
+  });
+
+  // The client cabinet: the sign-in buttons without the AI (an unlinked chat was asked for the phone above).
+  pm.command('me', async (c) => {
+    await pipeline.receiveHandled(sender(c), c.message.text, () => sendCabinetLink(ctx, c.chat.id));
+  });
+  pm.hears(BUTTONS.cabinet, async (c) => {
+    await pipeline.receiveHandled(sender(c), BUTTONS.cabinet, () => sendCabinetLink(ctx, c.chat.id));
   });
 
   pm.on('callback_query:data', async (c) => {
@@ -136,28 +180,27 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   });
 
   pm.on('message:photo', async (c) => {
-    const sizes = [...c.message.photo].reverse();
-    const best = sizes.find((s) => (s.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES);
     const caption = c.message.caption?.trim();
-    // Not awaited: grammY handles updates one by one, so a slow download must not stall other chats.
-    // The pipeline awaits the promise when it builds the AI request.
-    const image = best ? fetchImage(deps, best.file_id, 'image/jpeg') : undefined;
-    pipeline.receive(sender(c), caption ? `[Фото] ${caption}` : '[Фото]', image);
+    // Staff: the caption may be the awaited SMM remark or the link to a published post.
+    if (caption && (await onSmmPrivate(ctx, c.chat.id, caption))) return;
+    // The pipeline awaits the download when it builds the AI request.
+    pipeline.receive(sender(c), photoText(caption), messageImage(deps, c.message));
   });
 
   pm.on('message:document', async (c) => {
     const doc = c.message.document;
     const caption = c.message.caption?.trim();
-    const mediaType = doc.mime_type ? IMAGE_TYPES[doc.mime_type] : undefined;
-    if (mediaType && (doc.file_size ?? 0) <= MAX_CLIENT_IMAGE_BYTES) {
-      const image = fetchImage(deps, doc.file_id, mediaType);
-      pipeline.receive(sender(c), caption ? `[Фото] ${caption}` : '[Фото]', image);
+    const image = messageImage(deps, c.message);
+    if (image) {
+      pipeline.receive(sender(c), photoText(caption), image);
       return;
     }
     pipeline.receive(sender(c), `[Файл «${doc.file_name ?? 'без названия'}»]${caption ? ` ${caption}` : ''}`);
   });
 
   pm.on(['message:voice', 'message:audio'], async (c) => {
+    // Staff answering an SMM «Поправить» by voice are asked to write the remark (no speech recognition here).
+    if (await onSmmVoice(ctx, c.chat.id)) return;
     await pipeline.receiveUnsupported(sender(c), '[Голосовое сообщение]');
   });
 
@@ -170,6 +213,10 @@ export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   });
 
   pm.on('message:text', async (c) => {
+    // Staff: an awaited SMM remark or the link to a published post is handled there, not by the staff assistant.
+    if (await onSmmPrivate(ctx, c.chat.id, c.message.text)) return;
+    // The answer to the birthday question (bot/birthday.ts); anything else goes to the AI as usual.
+    if (await answerBirthdayQuestion({ ctx, pipeline }, sender(c), c.message.text)) return;
     pipeline.receive(sender(c), c.message.text);
   });
 }

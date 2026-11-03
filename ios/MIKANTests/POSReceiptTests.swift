@@ -119,40 +119,10 @@ final class ProductCatalogFilterTests: XCTestCase {
         XCTAssertEqual(ProductCatalogFilter.apply(products, query: "титан", category: "Кольцо").map(\.id), [2, 4], "matches material")
         XCTAssertTrue(ProductCatalogFilter.apply(products, query: "лабрет", category: "Кольцо").isEmpty)
     }
-
-    func testRowsSplitTilesIntoFixedColumns() {
-        XCTAssertEqual(ProductCatalogFilter.rows(products, columns: 2).map { $0.map(\.id) }, [[1, 2], [3, 4], [5]])
-        XCTAssertEqual(ProductCatalogFilter.rows(Array(products.prefix(4)), columns: 2).count, 2)
-        XCTAssertTrue(ProductCatalogFilter.rows([], columns: 2).isEmpty)
-        XCTAssertTrue(ProductCatalogFilter.rows(products, columns: 0).isEmpty)
-    }
 }
 
 @MainActor
 final class ReceiptDraftTests: XCTestCase {
-    func testAppointmentBanner() {
-        let appointment = POSFixtures.appointment()
-        let time = DateText.timeRange(appointment.startsAt, appointment.endsAt)
-        XCTAssertEqual(ReceiptDraft.appointmentBanner(appointment), "По записи · \(time) · Иван Петров · Хеликс")
-    }
-
-    func testAppointmentDetailsSayHowMuchOfThePrepaymentIsApplied() {
-        XCTAssertEqual(ReceiptDraft.appointmentDetails(master: "Анна", deposit: 0, applied: 0), "Мастер Анна")
-        XCTAssertEqual(
-            ReceiptDraft.appointmentDetails(master: "Анна", deposit: 2_000, applied: 2_000),
-            "Мастер Анна · предоплата \(Money.format(2_000)) зачтётся"
-        )
-        XCTAssertEqual(
-            ReceiptDraft.appointmentDetails(master: "Анна", deposit: 5_000, applied: 3_000),
-            "Мастер Анна · из предоплаты \(Money.format(5_000)) зачтётся \(Money.format(3_000))"
-        )
-        XCTAssertEqual(
-            ReceiptDraft.appointmentDetails(master: "Анна", deposit: 2_000, applied: 0),
-            "Мастер Анна · предоплата \(Money.format(2_000)) зачтётся",
-            "an empty receipt still shows the whole prepayment"
-        )
-    }
-
     func testDepositReceivedNoteUsesTheLatestReceive() {
         let first = Fixtures.referenceDate.addingTimeInterval(-3 * 86_400)
         let operations = [
@@ -185,35 +155,9 @@ final class POSRoutingTests: XCTestCase {
         return AppState(api: api, employee: nil, phase: .signedIn)
     }
 
-    func testShowReceiptLandsOnTheReceiptNotInCheckout() throws {
-        let state = try makeState()
-        state.selectedTab = .schedule
-        state.posPath = [.salesHistory]
-        state.cart.isCheckoutPresented = true
-
-        state.showReceipt()
-
-        XCTAssertEqual(state.selectedTab, .pos)
-        XCTAssertEqual(state.posPath, [.receipt])
-        XCTAssertFalse(state.cart.isCheckoutPresented)
-    }
-
-    func testCloseReceiptReturnsToTheHubAndKeepsTheCart() throws {
-        let state = try makeState()
-        state.cart.client = POSFixtures.ivan
-        state.showReceipt()
-        state.posPath.append(.clientPicker)
-
-        state.closeReceipt()
-
-        XCTAssertTrue(state.posPath.isEmpty)
-        XCTAssertEqual(state.cart.client, POSFixtures.ivan, "closing the screen keeps the receipt")
-    }
-
     func testCancellingTheCartsAppointmentLetsItsReceiptGo() throws {
         let state = try makeState()
         state.cart.prefill(from: POSFixtures.appointment(id: 4, status: .confirmed))
-        state.showReceipt()
 
         state.appointmentClosed(POSFixtures.appointment(id: 5, status: .cancelled))
         XCTAssertEqual(state.cart.appointmentId, 4, "another appointment")
@@ -224,7 +168,6 @@ final class POSRoutingTests: XCTestCase {
         state.appointmentClosed(POSFixtures.appointment(id: 4, status: .noShow))
         XCTAssertNil(state.cart.appointmentId)
         XCTAssertTrue(state.cart.isEmpty)
-        XCTAssertTrue(state.posPath.isEmpty)
     }
 }
 

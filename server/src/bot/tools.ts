@@ -3,16 +3,22 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { bookingRequests, botMessages, products, services } from '../db/schema.js';
+import { auditBookingRequest } from '../domain/audit-events.js';
 import { findChat, updateChatFlags } from '../domain/bot-chats.js';
 import { hasSizeInStock } from '../domain/products.js';
 import { normalizePhone, isPlausiblePhone } from '../lib/phone.js';
 import type { ProductRow, ServiceRow } from '../lib/serialize.js';
 import { truncate } from '../lib/text.js';
+import { bookingRequestPush, clientMessagePush } from '../push/staff-events.js';
 import type { JewelryList } from './callback-data.js';
+import { BOOK_APPOINTMENT_TOOL, buildBookingToolHandler } from './booking-tool.js';
+import { buildCabinetToolHandler, CABINET_LINK_TOOL } from './cabinet.js';
 import { buildClientToolHandlers } from './client-tools.js';
 import { photoMessageText, serviceCaptionTitle, servicePhotoSource } from './media.js';
+import { buildPortfolioToolHandler, SHOW_PORTFOLIO_TOOL, type PortfolioShot } from './portfolio.js';
 import { HISTORY_LIMIT } from './prompt.js';
 import { clientLabel, notifyStaff } from './staff.js';
+import { buildWaitlistToolHandler, JOIN_WAITLIST_TOOL } from './waitlist-tool.js';
 
 export const MAX_PRODUCTS_PER_CALL = 5;
 
@@ -20,8 +26,9 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_booking_request',
     description:
-      'Создаёт заявку на запись для администратора. Вызывай, когда клиент хочет записаться и ты уже знаешь его имя, ' +
-      'телефон, желаемую услугу и удобное время. Время не подтверждается автоматически — администратор свяжется с клиентом.',
+      'Создаёт заявку на запись для администратора. Вызывай, когда клиент хочет записаться, но точного времени у него нет ' +
+      '(«как-нибудь на выходных»), он просит, чтобы время подобрал администратор, или онлайн-запись выключена; нужны имя, ' +
+      'телефон, желаемая услуга и удобное время. Время не подтверждается автоматически — администратор свяжется с клиентом.',
     input_schema: {
       type: 'object',
       properties: {
@@ -77,6 +84,7 @@ export const TOOLS: Anthropic.Tool[] = [
       required: ['serviceId'],
     },
   },
+  SHOW_PORTFOLIO_TOOL,
   {
     name: 'show_jewelry_for_service',
     description:
@@ -114,9 +122,10 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'free_slots',
     description:
-      'Возвращает свободное время мастеров на дату в часы работы студии (шаг 30 минут). Для переноса записи передай ' +
-      'appointmentId — тогда учитываются её длительность и мастер. Для новой записи можно передать serviceId (длительность ' +
-      'услуги) и masterId. Предлагай клиенту 2–4 удобных варианта, а не весь список.',
+      'Возвращает свободное время мастеров на дату (в их рабочее время, с шагом и сроками онлайн-записи студии). Для ' +
+      'переноса записи передай appointmentId — тогда учитываются её длительность и мастер. Для новой записи передай ' +
+      'serviceId (длительность услуги) и masterId, если клиент хочет к конкретному мастеру. Предлагай клиенту 2–4 удобных ' +
+      'варианта, а не весь список.',
     input_schema: {
       type: 'object',
       properties: {
@@ -128,6 +137,8 @@ export const TOOLS: Anthropic.Tool[] = [
       required: ['date'],
     },
   },
+  BOOK_APPOINTMENT_TOOL,
+  JOIN_WAITLIST_TOOL,
   {
     name: 'reschedule_appointment',
     description:
@@ -143,6 +154,19 @@ export const TOOLS: Anthropic.Tool[] = [
       required: ['appointmentId', 'startsAt'],
     },
   },
+  {
+    name: 'certificate_balance',
+    description:
+      'Проверяет подарочный сертификат студии по коду (формат MIKAN-XXXX-XXXX; регистр, дефисы и пробелы не важны): ' +
+      'сколько на нём осталось и до какого числа он действует. Вызывай, когда клиент спрашивает о своём сертификате ' +
+      'и называет код. Кто купил сертификат, не сообщается и не обсуждается.',
+    input_schema: {
+      type: 'object',
+      properties: { code: { type: 'string', description: 'Код сертификата, как его написал клиент' } },
+      required: ['code'],
+    },
+  },
+  CABINET_LINK_TOOL,
 ];
 
 const bookingInput = z.object({
@@ -175,14 +199,26 @@ export interface ToolScope {
 export interface ToolSink {
   products: ProductRow[];
   services: ServiceRow[];
+  /** Photos of masters' work to send after the reply (`show_portfolio`). */
+  portfolio: PortfolioShot[];
   /** Jewelry carousels to send after the reply. */
   carousels: JewelryList[];
   notes: string[];
   /** Live actions that succeeded (used to confirm them if the model ends without text). */
-  done: Set<'booking' | 'handoff' | 'reschedule'>;
+  done: Set<'booking' | 'handoff' | 'reschedule' | 'online_booking' | 'waitlist' | 'cabinet'>;
+  /** Messages sent after the reply (the payment request of an online booking). */
+  after: Array<() => Promise<unknown>>;
 }
 
-export const emptySink = (): ToolSink => ({ products: [], services: [], carousels: [], notes: [], done: new Set() });
+export const emptySink = (): ToolSink => ({
+  products: [],
+  services: [],
+  portfolio: [],
+  carousels: [],
+  notes: [],
+  done: new Set(),
+  after: [],
+});
 
 const invalid = (what: string): ToolResult => ({ content: `Некорректные данные: ${what}. Уточни у клиента и попробуй снова.`, isError: true });
 
@@ -218,6 +254,10 @@ export function buildToolHandlers(ctx: AppContext, scope: ToolScope, sink: ToolS
   const who = clientLabel(scope.telegramName, scope.username);
   return {
     ...buildClientToolHandlers(ctx, scope, sink),
+    book_appointment: buildBookingToolHandler(ctx, scope, sink),
+    join_waitlist: buildWaitlistToolHandler(ctx, scope, sink),
+    show_portfolio: buildPortfolioToolHandler(ctx, scope, sink),
+    cabinet_link: buildCabinetToolHandler(ctx, scope, sink),
     create_booking_request: async (raw) => {
       const parsed = bookingInput.safeParse(raw);
       if (!parsed.success) {
@@ -248,6 +288,7 @@ export function buildToolHandlers(ctx: AppContext, scope: ToolScope, sink: ToolS
         })
         .returning()
         .get();
+      auditBookingRequest(ctx, row);
       await notifyStaff(
         ctx,
         [
@@ -259,6 +300,7 @@ export function buildToolHandlers(ctx: AppContext, scope: ToolScope, sink: ToolS
           ...(input.comment ? [`Комментарий: ${input.comment}`] : []),
           `Telegram: ${who}`,
         ].join('\n'),
+        () => bookingRequestPush(row),
       );
       sink.done.add('booking');
       return { content: `Заявка №${row.id} создана. Администратор свяжется с клиентом, чтобы подтвердить время.` };
@@ -271,13 +313,13 @@ export function buildToolHandlers(ctx: AppContext, scope: ToolScope, sink: ToolS
         sink.notes.push(`диалог передан бы администратору: ${parsed.data.reason}`);
         return { content: 'Тестовый режим: администратор не уведомлён, но для клиента всё выглядит как обычно.' };
       }
-      if (scope.chatId !== null && findChat(ctx.db, scope.chatId)) {
-        updateChatFlags(ctx.db, scope.chatId, { needsAttention: true });
-      }
+      const chat =
+        scope.chatId !== null && findChat(ctx.db, scope.chatId) ? updateChatFlags(ctx.db, scope.chatId, { needsAttention: true }) : null;
       await notifyStaff(
         ctx,
         `🙋 Бот передал диалог администратору\nКлиент: ${who}\nПричина: ${parsed.data.reason}\n` +
           `Последнее сообщение: «${truncate(scope.lastUserText, 500)}»\nОтветьте в приложении MIKAN.`,
+        chat ? () => clientMessagePush(ctx.db, chat, scope.lastUserText) : undefined,
       );
       sink.done.add('handoff');
       return { content: 'Администратор уведомлён и скоро ответит в этом чате.' };

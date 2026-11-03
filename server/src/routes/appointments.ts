@@ -43,6 +43,7 @@ const body = z.object({
   notes: nullableText(5000),
   status: nonNull(status),
   force: nonNull(z.boolean()),
+  notifyClient: nonNull(z.boolean()),
 });
 const listQuery = z.object({
   from: queryInstant,
@@ -50,6 +51,7 @@ const listQuery = z.object({
   masterId: queryId,
   clientId: queryId,
   status: z.string().trim().max(200).optional(),
+  onlineState: z.string().trim().max(100).optional(),
 });
 const completeBody = z.object({
   sendAftercare: nonNull(z.boolean()),
@@ -59,6 +61,16 @@ const completeBody = z.object({
     .max(100)
     .nullish(),
 });
+
+const ONLINE_STATES = ['awaiting_payment', 'awaiting_confirmation'];
+
+function parseOnlineStates(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const list = value.split(',').map((s) => s.trim()).filter(Boolean);
+  const invalid = list.find((s) => !ONLINE_STATES.includes(s));
+  if (invalid) throw badRequest(`«Онлайн-запись»: недопустимое значение «${invalid}»`);
+  return list;
+}
 
 function parseStatuses(value: string | undefined): string[] | undefined {
   if (!value) return undefined;
@@ -79,6 +91,7 @@ export function appointmentRoutes(app: FastifyInstance, ctx: AppContext): void {
       masterId: q.masterId,
       clientId: q.clientId,
       statuses: parseStatuses(q.status),
+      onlineStates: parseOnlineStates(q.onlineState),
     });
     return { items: serializeAppointments(db, rows) };
   });
@@ -96,7 +109,7 @@ export function appointmentRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.patch('/appointments/:id', async (request) => {
     const params = parse(idParams, request.params);
     const input = parse(body, request.body);
-    return serializeAppointment(db, updateAppointment(db, params.id, input));
+    return serializeAppointment(db, updateAppointment(db, params.id, input, request.employee.id));
   });
 
   app.post('/appointments/:id/complete', async (request) => {

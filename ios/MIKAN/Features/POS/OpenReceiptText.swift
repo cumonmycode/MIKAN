@@ -1,30 +1,8 @@
 import Foundation
 
-/// Texts of the open receipts on the POS hub and of deleting one.
+/// Texts of the open receipts on the POS hub (who opened one and when) and of deleting one.
 nonisolated enum OpenReceiptText {
     static let deleteTitle = "Удалить чек?"
-
-    /// "По записи · Анна Смирнова", the client, or "Без клиента".
-    static func who(_ receipt: OpenReceipt) -> String {
-        if let appointment = receipt.appointment { return "По записи · \(appointment.client.fullName)" }
-        return receipt.client?.fullName ?? "Без клиента"
-    }
-
-    /// "14:00–15:00 · Хеликс · Анна" — the visit the receipt pays for.
-    static func appointmentLine(_ appointment: Appointment) -> String {
-        let time = DateText.timeRange(appointment.startsAt, appointment.endsAt)
-        return "\(time) · \(appointment.displayTitle) · \(appointment.master.name)"
-    }
-
-    /// "2 позиции · Открыл(а) Фатима · 14:05"
-    static func details(_ receipt: OpenReceipt, now: Date = .now, calendar: Calendar = .app) -> String {
-        "\(contents(itemCount: receipt.itemCount)) · \(opened(receipt, now: now, calendar: calendar))"
-    }
-
-    /// "2 позиции", or "Пусто".
-    static func contents(itemCount: Int) -> String {
-        itemCount == 0 ? "Пусто" : Plural.count(itemCount, one: "позиция", few: "позиции", many: "позиций")
-    }
 
     /// "Открыл(а) Фатима · 14:05"; a receipt left from another day adds the date: "… · 15 окт., 14:05".
     static func opened(_ receipt: OpenReceipt, now: Date = .now, calendar: Calendar = .app) -> String {

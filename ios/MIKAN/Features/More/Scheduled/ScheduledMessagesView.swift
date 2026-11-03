@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// Aftercare and reminder messages queued by the bot.
+/// Aftercare, reminder and post-visit messages queued by the bot.
 struct ScheduledMessagesView: View {
     @Environment(APIClient.self) private var api
     @State private var status: ScheduledStatus = .pending
+    /// The filter on screen: cleared only for another one, not when the screen reappears after a swipe back.
+    @State private var shownStatus: ScheduledStatus?
     @State private var messages = Remote<[ScheduledMessage]>()
     @State private var pendingCancel: ScheduledMessage?
     @State private var errorMessage: String?
@@ -50,14 +52,15 @@ struct ScheduledMessagesView: View {
                     status.emptyTitle,
                     systemImage: "clock.badge.checkmark",
                     description: Text(status == .pending
-                        ? "Памятки по уходу и напоминания о записи появятся здесь, когда бот их запланирует."
+                        ? "Памятки по уходу, напоминания о записи и сообщения после визита появятся здесь, когда бот их запланирует."
                         : "Пока ничего нет.")
                 )
             }
         }
         .refreshable { await load() }
         .task(id: status) {
-            messages.reset()
+            if shownStatus != status { messages.reset() }
+            shownStatus = status
             await load()
         }
         .remoteErrorAlert(messages)
@@ -112,6 +115,19 @@ private extension ScheduledStatus {
     }
 }
 
+private extension ScheduledKind {
+    var color: Color {
+        switch self {
+        case .aftercare: .teal
+        case .reminder: .blue
+        case .healingCheck: .pink
+        case .jewelryChange: .purple
+        case .rescheduleNotice: .orange
+        case .other: .gray
+        }
+    }
+}
+
 private struct ScheduledMessageRow: View {
     let message: ScheduledMessage
 
@@ -119,10 +135,7 @@ private struct ScheduledMessageRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(message.client?.fullName ?? "Клиент").font(.headline)
-                StatusBadge(
-                    text: message.kind == .aftercare ? "Уход" : "Напоминание",
-                    color: message.kind == .aftercare ? .teal : .blue
-                )
+                StatusBadge(text: message.kind.title, color: message.kind.color)
                 Spacer()
                 Text(DateText.time(message.sentAt ?? message.sendAt))
                     .font(.subheadline)

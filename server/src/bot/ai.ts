@@ -51,6 +51,9 @@ export interface AiRunResult {
   /** True when the tool loop hit MAX_TOOL_ITERATIONS without the model finishing. */
   loopCapped: boolean;
   error?: string;
+  /** The provider's HTTP status and error code of a failed request (402 / INSUFFICIENT_BALANCE = no balance). */
+  errorStatus?: number;
+  errorCode?: string;
 }
 
 /** Logs the useful parts of an API error (status, gateway error code, trace id) — never credentials. */
@@ -132,8 +135,13 @@ export async function runAi(client: AiClient, input: AiRunInput, log: Logger): P
         messages,
       });
     } catch (err) {
-      log.error({ ai: describeAiError(err) }, 'AI request failed');
-      return result('error', errorMessage(err));
+      const described = describeAiError(err);
+      log.error({ ai: described }, 'AI request failed');
+      return {
+        ...result('error', errorMessage(err)),
+        ...(typeof described.status === 'number' ? { errorStatus: described.status } : {}),
+        ...(typeof described.code === 'string' ? { errorCode: described.code } : {}),
+      };
     }
     usage.input += response.usage?.input_tokens ?? 0;
     usage.output += response.usage?.output_tokens ?? 0;

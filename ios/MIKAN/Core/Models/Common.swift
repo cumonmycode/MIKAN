@@ -11,8 +11,37 @@ nonisolated struct Badges: Codable, Hashable, Sendable {
     let needsAttention: Int
     let newBookingRequests: Int
     let lowStock: Int
+    /// Future online bookings waiting for staff confirmation; 0 from a server without online booking.
+    var onlineAwaiting = 0
+    /// Open waitlist entries (`waiting` + `notified`); 0 from a server without the waitlist.
+    var waitlist = 0
+    /// SMM posts waiting for approval in the enabled profiles; 0 from a server without the SMM module.
+    var smmReview = 0
 
     static let zero = Badges(unreadChats: 0, needsAttention: 0, newBookingRequests: 0, lowStock: 0)
+
+    /// The «Ещё» tab: the sum of its rows' badges — unread chats, new booking requests, online bookings to confirm,
+    /// the open waitlist and SMM posts to approve (low stock is on «Склад»).
+    var moreTab: Int { unreadChats + newBookingRequests + onlineAwaiting + waitlist + smmReview }
+}
+
+nonisolated extension Badges {
+    private enum CodingKeys: String, CodingKey {
+        case unreadChats, needsAttention, newBookingRequests, lowStock, onlineAwaiting, waitlist, smmReview
+    }
+
+    /// Tolerates servers that predate online booking (no `onlineAwaiting`), the waitlist (no `waitlist`) or the SMM
+    /// module (no `smmReview`).
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        unreadChats = try c.decode(Int.self, forKey: .unreadChats)
+        needsAttention = try c.decode(Int.self, forKey: .needsAttention)
+        newBookingRequests = try c.decode(Int.self, forKey: .newBookingRequests)
+        lowStock = try c.decode(Int.self, forKey: .lowStock)
+        onlineAwaiting = try c.decodeIfPresent(Int.self, forKey: .onlineAwaiting) ?? 0
+        waitlist = try c.decodeIfPresent(Int.self, forKey: .waitlist) ?? 0
+        smmReview = try c.decodeIfPresent(Int.self, forKey: .smmReview) ?? 0
+    }
 }
 
 nonisolated struct Dashboard: Codable, Sendable {

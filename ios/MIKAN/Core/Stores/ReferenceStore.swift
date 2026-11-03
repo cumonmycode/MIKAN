@@ -70,6 +70,22 @@ final class ReferenceStore {
         loadedCategories = true
     }
 
+    /// Takes one category created or renamed anywhere in the app, so every picker offers it at once.
+    func upsertCategory(_ category: CatalogCategory) {
+        if categories.contains(where: { $0.id == category.id }) {
+            categories = categories.map { $0.id == category.id ? category : $0 }
+        } else {
+            categories = categories + [category]
+        }
+    }
+
+    /// An item was saved with this category: the server registers a name it does not know, so ask for the registry
+    /// again — otherwise the new category shows on the warehouse list but not in the pickers.
+    func refreshCategoriesIfUnknown(_ name: String?, in scope: CategoryScope) async {
+        guard let name = name?.nonEmpty, categories.named(name, in: scope) == nil else { return }
+        try? await ensureCategories(force: true)
+    }
+
     /// Asked again on every checkout until enabled, so turning QR on at the server needs no app restart.
     func ensureQrPaymentsConfig() async throws {
         guard !qrPaymentsEnabled else { return }

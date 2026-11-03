@@ -3,11 +3,15 @@ import Foundation
 // MARK: - Sales, cash register, reports
 
 extension APIClient {
-    func sales(from: Date? = nil, to: Date? = nil, clientId: Int? = nil, limit: Int = 50, offset: Int = 0) async throws -> ItemsResponse<Sale> {
+    /// `search` — a receipt number («17», «№17») or the client's name or phone.
+    func sales(
+        from: Date? = nil, to: Date? = nil, clientId: Int? = nil, search: String? = nil, limit: Int = 50, offset: Int = 0
+    ) async throws -> ItemsResponse<Sale> {
         try await request(.get, "sales", query: queryItems([
             "from": from.map(ISO8601.string(from:)),
             "to": to.map(ISO8601.string(from:)),
             "clientId": clientId.map(String.init),
+            "search": search.nonEmpty,
             "limit": String(limit),
             "offset": String(offset),
         ]))
@@ -23,6 +27,16 @@ extension APIClient {
 
     func refundSale(id: Int, _ body: RefundBody, idempotencyKey: UUID) async throws -> Sale {
         try await request(.post, "sales/\(id)/refund", body: body, idempotencyKey: idempotencyKey)
+    }
+
+    /// What returning these units (`nil` — everything left) would give back; nothing is written.
+    func refundPreview(saleId: Int, items: [RefundItemBody]?) async throws -> RefundPreview {
+        try await request(.post, "sales/\(saleId)/refund/preview", body: RefundPreviewBody(items: items))
+    }
+
+    /// Sends (or resends) the receipt to the client's Telegram, or to `chatId`.
+    func sendSaleReceipt(id: Int, chatId: Int64? = nil) async throws -> Sale {
+        try await request(.post, "sales/\(id)/send", body: SendReceiptBody(chatId: chatId))
     }
 
     func qrPaymentsConfig() async throws -> QrPaymentsConfig {

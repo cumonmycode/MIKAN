@@ -4,6 +4,7 @@ import SwiftUI
 struct ChatView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppState.self) private var appState
+    @Environment(\.permissions) private var permissions
 
     @State private var chat: BotChat
     var onChange: ((BotChat) -> Void)?
@@ -21,6 +22,8 @@ struct ChatView: View {
     @State private var sentCount = 0
     @State private var unlinkedCount = 0
     @State private var boundCount = 0
+    /// Presented from here: a row of the lazy list goes away when a new message scrolls the chat, and its cover with it.
+    @State private var viewedPhoto: ChatPhotoItem?
 
     private static let pageSize = 50
     private static let pollInterval: Duration = .seconds(5)
@@ -51,7 +54,7 @@ struct ChatView: View {
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 6)
                     case .message(let message):
-                        ChatBubble(message: message)
+                        ChatBubble(message: message) { viewedPhoto = ChatPhotoItem(image: $0) }
                     }
                 }
             }
@@ -75,6 +78,7 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .task { await pollLoop() }
+        .fullScreenCover(item: $viewedPhoto) { ChatPhotoViewer(image: $0.image) }
         .errorAlert($errorMessage)
         .sensoryFeedback(.success, trigger: sentCount)
         .sensoryFeedback(.success, trigger: unlinkedCount)
@@ -118,7 +122,7 @@ struct ChatView: View {
             .disabled(isTogglingAI)
             .accessibilityHint(chat.aiPaused ? "Включить ответы ИИ" : "Поставить ИИ на паузу")
         }
-        if StaffBinding.canBind(chat) {
+        if StaffBinding.canBind(chat), permissions.editsSettings {
             ToolbarSpacer(.fixed, placement: .topBarTrailing)
             ToolbarItem(placement: .topBarTrailing) {
                 StaffBindingMenu(chat: chat, onBound: employeeBound)

@@ -1,34 +1,20 @@
 import SwiftUI
 
-/// Who the receipt is for: the appointment it pays (with «Отвязать»), the client, or «Добавить клиента».
-/// A failed save shows below it.
+/// Who the receipt is for, as chips: the client (tap — another one, × — none) and the visit it pays for (time and
+/// master; its menu unlinks it). A failed save shows below.
 struct ReceiptHeaderSection: View {
-    @Environment(AppState.self) private var appState
     @Environment(CartStore.self) private var cart
     @Environment(OpenReceiptsStore.self) private var receipts
+    let onPickClient: () -> Void
 
     var body: some View {
         Section {
-            if let appointment = cart.appointment {
-                ReceiptAppointmentBanner(appointment: appointment, deposit: cart.deposit, applied: cart.depositApplied) {
-                    withAnimation(.snappy) { cart.detachAppointment() }
-                }
-            } else if let client = cart.client {
-                ReceiptClientRow(client: client, onChange: pickClient) {
-                    withAnimation(.snappy) { cart.client = nil }
-                }
-            } else {
-                Button(action: pickClient) {
-                    HStack {
-                        Label("Добавить клиента", systemImage: "person.crop.circle.badge.plus")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .contentShape(.rect)
-                }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { chips }
+                VStack(alignment: .leading, spacing: 8) { chips }
             }
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
         } footer: {
             if receipts.saveFailed {
                 Label("Не сохранено — повторим при следующем изменении", systemImage: "exclamationmark.icloud")
@@ -38,159 +24,262 @@ struct ReceiptHeaderSection: View {
         }
     }
 
-    private func pickClient() {
-        appState.posPath.append(.clientPicker)
-    }
-}
-
-private struct ReceiptAppointmentBanner: View {
-    let appointment: Appointment
-    /// Prepayment held for the appointment and the part of it this receipt applies.
-    let deposit: Int
-    let applied: Int
-    let onDetach: () -> Void
-
-    private var masterColor: Color { .master(appointment.master.color) }
-
-    private var details: String {
-        ReceiptDraft.appointmentDetails(master: appointment.master.name, deposit: deposit, applied: applied)
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "calendar.badge.checkmark")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(masterColor)
-                .frame(width: 34, height: 34)
-                .background(masterColor.opacity(0.15), in: .circle)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(ReceiptDraft.appointmentBanner(appointment))
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
-                Text(details)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            Button("Отвязать", action: onDetach)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .accessibilityHint(deposit > 0
-                    ? "Чек останется без записи, запись вернётся в «К оплате», предоплата останется за ней"
-                    : "Чек останется без записи, запись вернётся в «К оплате»")
+    @ViewBuilder
+    private var chips: some View {
+        ReceiptClientChip(client: cart.client, onPick: onPickClient) {
+            withAnimation(.snappy) { cart.client = nil }
         }
-        .padding(.vertical, 2)
+        if let appointment = cart.appointment {
+            ReceiptAppointmentChip(appointment: appointment) {
+                withAnimation(.snappy) { cart.detachAppointment() }
+            }
+        }
     }
 }
 
-private struct ReceiptClientRow: View {
-    let client: ClientRef
-    let onChange: () -> Void
+private struct ReceiptClientChip: View {
+    let client: ClientRef?
+    let onPick: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Button(action: onChange) {
-                HStack(spacing: 12) {
-                    InitialsAvatar(name: client.fullName, size: 34)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Клиент").font(.caption).foregroundStyle(.secondary)
-                        Text(client.fullName).font(.subheadline.weight(.semibold))
+        HStack(spacing: 0) {
+            Button(action: onPick) {
+                HStack(spacing: 8) {
+                    if let client {
+                        InitialsAvatar(name: client.fullName, size: 30)
+                        Text(client.fullName)
+                            .lineLimit(1)
+                    } else {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                            .font(.title3)
+                        Text("Клиент")
                     }
-                    Spacer(minLength: 8)
                 }
-                .contentShape(.rect)
+                .font(.subheadline.weight(.semibold))
+                .padding(.leading, 8)
+                .padding(.trailing, client == nil ? 16 : 2)
+                .frame(minHeight: 44)
+                .contentShape(.capsule)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Клиент: \(client.fullName)")
-            .accessibilityHint("Выбрать другого клиента")
+            .accessibilityLabel(client.map { "Клиент: \($0.fullName)" } ?? "Добавить клиента")
+            .accessibilityHint(client == nil ? "" : "Выбрать другого клиента")
+            if client != nil {
+                Button("Убрать клиента", systemImage: "xmark.circle.fill", action: onRemove)
+                    .labelStyle(.iconOnly)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+                    .buttonStyle(.plain)
+            }
+        }
+        .foregroundStyle(client == nil ? Color.accentColor : Color.primary)
+        .background(Color(.secondarySystemGroupedBackground), in: .capsule)
+    }
+}
 
-            Button("Убрать клиента", systemImage: "xmark.circle.fill", action: onRemove)
-                .labelStyle(.iconOnly)
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .buttonStyle(.borderless)
+/// «14:00–15:00 · Фатима» in the master's colour; the menu names the visit and unlinks it.
+private struct ReceiptAppointmentChip: View {
+    let appointment: Appointment
+    let onDetach: () -> Void
+
+    private var color: Color { .master(appointment.master.color) }
+    private var when: String { PaymentDueText.when(.visit(appointment)) }
+
+    var body: some View {
+        Menu {
+            Section(appointment.displayTitle) {
+                Button("Отвязать от записи", systemImage: "calendar.badge.minus", action: onDetach)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .foregroundStyle(color)
+                Text(when)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
+            .background(color.opacity(0.16), in: .capsule)
+            .contentShape(.capsule)
+        }
+        .accessibilityLabel("По записи: \(when), \(appointment.displayTitle)")
+        .accessibilityHint(appointment.deposit > 0
+            ? "Отвязать: чек останется без записи, запись вернётся в «К оплате», предоплата останется за ней"
+            : "Отвязать: чек останется без записи, запись вернётся в «К оплате»")
+    }
+}
+
+/// What can be added to a receipt: the big buttons under its lines.
+enum ReceiptAddition: CaseIterable, Identifiable {
+    case jewelry
+    case service
+    case goods
+    case certificate
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .jewelry: "Украшение"
+        case .service: "Услуга"
+        case .goods: "Товар"
+        case .certificate: "Сертификат"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .jewelry: CatalogSection.jewelry.symbol
+        case .service: "hands.and.sparkles"
+        case .goods: CatalogSection.goods.symbol
+        case .certificate: PaymentLine.certificateSymbol
+        }
+    }
+
+    /// The catalog segment it opens; `nil` for a certificate (its own sheet).
+    var catalog: POSCatalog? {
+        switch self {
+        case .jewelry: .jewelry
+        case .service: .services
+        case .goods: .goods
+        case .certificate: nil
         }
     }
 }
 
-/// Editable receipt lines: unit price, quantity, swipe to delete.
+/// The receipt's lines, compact: tap one to change its price or quantity, swipe to delete; the add buttons below.
 struct ReceiptLinesSection: View {
     @Environment(CartStore.self) private var cart
+    let onEdit: (CartLine.ID) -> Void
+    let onAdd: (ReceiptAddition) -> Void
 
     var body: some View {
-        @Bindable var cart = cart
         Section {
-            if cart.lines.isEmpty {
-                Label("Добавьте украшение или товар из каталога ниже, услугу — кнопкой «Услуга».", systemImage: "cart")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach($cart.lines) { $line in
-                    ReceiptLineRow(
-                        line: $line,
-                        stockLimit: cart.stockLimit(for: line),
-                        stockWarning: cart.stockWarning(for: line)
-                    )
-                }
-                .onDelete { offsets in
-                    withAnimation(.snappy) { cart.remove(at: offsets) }
+            ForEach(cart.lines) { line in
+                ReceiptLineRow(line: line, warning: cart.stockWarning(for: line) ?? ReceiptLineText.problem(line)) {
+                    onEdit(line.id)
                 }
             }
+            .onDelete { offsets in
+                withAnimation(.snappy) { cart.remove(at: offsets) }
+            }
+            ReceiptAddButtons(onAdd: onAdd)
+                .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
         } header: {
-            Text("Позиции")
+            if !cart.isEmpty {
+                Text(Plural.count(cart.itemCount, one: "позиция", few: "позиции", many: "позиций"))
+            }
         } footer: {
-            if !cart.lines.isEmpty {
-                Text("Смахните позицию влево, чтобы удалить её из чека.")
+            if cart.isEmpty {
+                Text("Добавьте украшение, услугу или товар — позиции появятся здесь.")
             }
         }
     }
 }
 
 private struct ReceiptLineRow: View {
-    @Binding var line: CartLine
-    /// How many of the line's size the stock still allows (other lines of that size count); `nil` for services.
-    let stockLimit: Int?
-    /// Set when all lines of the size together exceed its stock.
-    let stockWarning: String?
-
-    private static let serviceQuantityLimit = 99
-
-    /// Products cannot be sold beyond the stock of their size (the server answers `insufficient_stock`).
-    private var quantityRange: ClosedRange<Int> {
-        guard let stockLimit else { return 1...Self.serviceQuantityLimit }
-        return 1...max(1, stockLimit, line.quantity)
-    }
+    let line: CartLine
+    /// Not enough stock of the size, or a certificate that cannot be sold as it is.
+    let warning: String?
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Button(action: onTap) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: line.symbol)
                     .foregroundStyle(Color.accentColor)
+                    .frame(width: 22)
                     .accessibilityHidden(true)
-                SizedItemTitle(name: line.name, size: line.sizeName)
-                    .font(.body.weight(.medium))
+                VStack(alignment: .leading, spacing: 3) {
+                    SizedItemTitle(name: line.name, size: line.sizeName)
+                        .font(.body.weight(.medium))
+                    if let detail = ReceiptLineText.detail(line) {
+                        Text(detail)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    if let warning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.orange)
+                    }
+                }
                 Spacer(minLength: 8)
                 MoneyText(line.total)
                     .font(.body.weight(.semibold))
                     .contentTransition(.numericText(value: Double(line.total)))
                     .animation(.snappy, value: line.total)
             }
-            NumberField.money("Цена за шт.", value: $line.unitPrice)
-                .font(.subheadline)
-            Stepper(value: $line.quantity, in: quantityRange) {
-                Text("Количество: \(line.quantity)")
-                    .font(.subheadline)
-                    .monospacedDigit()
-            }
-            if let stockWarning {
-                Label(stockWarning, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.orange)
+            .padding(.vertical, 4)
+            .frame(minHeight: 44)
+            .contentShape(.rect)
+        }
+        // A list row, not a link: plain text colours instead of the accent tint.
+        .tint(.primary)
+        .accessibilityHint("Изменить цену или количество. Смахните влево, чтобы удалить")
+    }
+}
+
+/// «Украшение», «Услуга», «Товар», «Сертификат».
+private struct ReceiptAddButtons: View {
+    let onAdd: (ReceiptAddition) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(ReceiptAddition.allCases) { addition in
+                Button {
+                    onAdd(addition)
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: addition.symbol)
+                            .font(.title3)
+                            .frame(height: 24)
+                        Text(addition.title)
+                            .font(.footnote.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .background(Color.accentColor.opacity(0.12), in: .rect(cornerRadius: 16))
+                    .contentShape(.rect(cornerRadius: 16))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Добавить: \(addition.title.lowercased())")
             }
         }
-        .padding(.vertical, 4)
+    }
+}
+
+/// Texts of a receipt line.
+enum ReceiptLineText {
+    /// «2 × 1 500 ₽» for several units, «Кому: Маше» for a gift certificate; `nil` otherwise.
+    static func detail(_ line: CartLine) -> String? {
+        if line.isCertificate {
+            return line.recipientName.trimmed.isEmpty ? nil : "Кому: \(line.recipientName.trimmed)"
+        }
+        guard line.quantity > 1 else { return nil }
+        return "\(line.quantity) × \(Money.format(line.unitPrice))"
+    }
+
+    /// Why a gift certificate line cannot be sold as it is; `nil` when it can (and for other lines).
+    static func problem(_ line: CartLine) -> String? {
+        guard line.isCertificate else { return nil }
+        if !CertificateRules.isValidAmount(line.unitPrice) { return CertificateRules.amountHint }
+        if line.recipientName.trimmed.count > CertificateRules.recipientNameLimit {
+            return "Имя — не длиннее \(CertificateRules.recipientNameLimit) символов"
+        }
+        return nil
     }
 }
 

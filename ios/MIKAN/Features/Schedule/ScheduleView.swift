@@ -141,9 +141,27 @@ struct ScheduleView: View {
         ToolbarItem(placement: .principal) {
             ModePicker(mode: $mode)
         }
+        if appState.badges.onlineAwaiting > 0 {
+            ToolbarItem(placement: .topBarTrailing) {
+                onlineBookingsLink(count: appState.badges.onlineAwaiting)
+            }
+        }
         ToolbarItem(placement: .topBarTrailing) {
             scaleMenu
         }
+    }
+
+    /// Online bookings waiting for confirmation: shown only while there are any.
+    private func onlineBookingsLink(count: Int) -> some View {
+        NavigationLink {
+            OnlineBookingsView()
+        } label: {
+            Label("\(count)", systemImage: "clock.badge.questionmark")
+                .labelStyle(.titleAndIcon)
+                .monospacedDigit()
+                .foregroundStyle(.orange)
+        }
+        .accessibilityLabel("Онлайн-записи ждут подтверждения: \(count)")
     }
 
     private var scaleMenu: some View {
@@ -210,6 +228,7 @@ struct ScheduleView: View {
             .buttonStyle(.plain)
             .glassEffect(.regular.tint(.accentColor).interactive(), in: .circle)
             .accessibilityLabel("Новая запись")
+            .needsConnection()
         }
         .padding(.trailing, 20)
         .padding(.bottom, 20)

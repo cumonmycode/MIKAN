@@ -11,7 +11,7 @@ struct AppointmentServicesSection: View {
             ForEach($draft.lines) { $line in
                 ServiceLineEditorRow(
                     line: $line,
-                    catalogPrice: isVariablePrice(line) ? reference.service(id: line.serviceId)?.priceText : nil,
+                    catalogPrice: isVariablePrice(line) ? catalogPriceText(line) : nil,
                     needsPrice: needsPrice(line)
                 )
             }
@@ -41,12 +41,17 @@ struct AppointmentServicesSection: View {
         }
     }
 
-    /// Lines loaded from a saved appointment don't carry the flag, so the catalog is consulted too
-    /// (variant prices are fixed, so services with variants don't count).
+    /// Lines loaded from a saved appointment don't carry the flag, so the catalog is consulted too, for the
+    /// appointment's master (variant prices are fixed, so services with variants don't count).
     private func isVariablePrice(_ line: DraftServiceLine) -> Bool {
         if line.isVariablePrice { return true }
         guard let service = reference.service(id: line.serviceId) else { return false }
-        return service.hasVariablePrice && service.variants.isEmpty
+        return service.hasVariablePrice(for: draft.masterId) && service.variants.isEmpty
+    }
+
+    /// «от 3 000 до 6 000 ₽» — the catalog price of the appointment's master.
+    private func catalogPriceText(_ line: DraftServiceLine) -> String? {
+        reference.service(id: line.serviceId)?.priceText(for: draft.masterId)
     }
 
     private func needsPrice(_ line: DraftServiceLine) -> Bool {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTestApp, make, type TestApp } from './helpers.js';
+import { createTestApp, make, openShift, type TestApp } from './helpers.js';
 
 const NOW = Date.parse('2026-10-15T09:00:00.000Z');
 
@@ -42,6 +42,7 @@ describe('history: what was done for a client, who got a service, who bought a p
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
     t = await createTestApp();
+    await openShift(t);
     tattoo = await make(t, '/api/services', { name: 'Тату среднее', category: 'tattoo', price: 8000, durationMin: 120 });
     piercing = await make(t, '/api/services', { name: 'Соски', category: 'piercing', price: 2500, durationMin: 45 });
     labret = await make(t, '/api/products', { kind: 'jewelry', name: 'Лабрет', price: 1500, initialQuantity: 10 });

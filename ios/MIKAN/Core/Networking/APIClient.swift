@@ -18,6 +18,10 @@ final class APIClient {
     @ObservationIgnored private(set) var token: String?
     /// Called on any 401 for an authenticated request (session expired or employee deactivated).
     @ObservationIgnored var onUnauthorized: (() -> Void)?
+    /// The offline mode: hears whether each request got an answer; while offline, writes are refused unsent.
+    @ObservationIgnored var connectivity: Connectivity?
+    /// The phone's copy of the main data, served by some GETs while offline (`APIClient+Offline`).
+    @ObservationIgnored var offlineCache: OfflineCache?
 
     @ObservationIgnored private let session: URLSession
     @ObservationIgnored private let encoder = JSONCoding.makeEncoder()
@@ -25,7 +29,9 @@ final class APIClient {
     @ObservationIgnored private let logger = Logger(subsystem: "com.mikanstudio.crm", category: "api")
 
     static let requestTimeout: TimeInterval = 20
-    private static let uploadTimeout: TimeInterval = 60
+    static let uploadTimeout: TimeInterval = 60
+    /// Videos up to 100 MB over a mobile uplink.
+    static let videoUploadTimeout: TimeInterval = 600
     /// AI picture generation answers in 1–2 minutes.
     static let imageGenerationTimeout: TimeInterval = 240
 
@@ -61,12 +67,13 @@ final class APIClient {
         query: [URLQueryItem] = [],
         body: (any Encodable)? = nil,
         idempotencyKey: UUID? = nil,
-        timeout: TimeInterval = APIClient.requestTimeout
+        timeout: TimeInterval = APIClient.requestTimeout,
+        headers: [String: String] = [:]
     ) async throws -> T {
         let payload = try body.map { try encoder.encode($0) }
         let data = try await send(
             method, path, query: query, body: payload,
-            contentType: "application/json", timeout: timeout, idempotencyKey: idempotencyKey
+            contentType: "application/json", timeout: timeout, idempotencyKey: idempotencyKey, headers: headers
         )
         return try decode(T.self, from: data, path: path)
     }
@@ -77,21 +84,39 @@ final class APIClient {
         _ = try await send(method, path, query: [], body: payload, contentType: "application/json")
     }
 
+    /// For endpoints answering with a file instead of JSON.
+    func requestData(_ method: HTTPMethod, _ path: String) async throws -> Data {
+        try await send(method, path, query: [], body: nil, contentType: "application/json")
+    }
+
     /// `POST /uploads` with a `multipart/form-data` field `file`.
     func uploadImage(jpegData: Data, filename: String = "photo.jpg") async throws -> LinkResponse {
+        try await upload("uploads", data: jpegData, filename: filename, mimeType: "image/jpeg")
+    }
+
+    /// `POST <path>` with one `multipart/form-data` field `file` (photo or video) and a JSON answer.
+    func upload<T: Decodable>(
+        _ path: String,
+        data fileData: Data,
+        filename: String,
+        mimeType: String,
+        timeout: TimeInterval = APIClient.uploadTimeout
+    ) async throws -> T {
         let boundary = "MIKAN-\(UUID().uuidString)"
-        var body = Data()
-        body.append(Data("--\(boundary)\r\n".utf8))
-        body.append(Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".utf8))
-        body.append(Data("Content-Type: image/jpeg\r\n\r\n".utf8))
-        body.append(jpegData)
-        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        let head = "--\(boundary)\r\n"
+            + "Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n"
+            + "Content-Type: \(mimeType)\r\n\r\n"
+        let tail = "\r\n--\(boundary)--\r\n"
+        var body = Data(capacity: fileData.count + head.utf8.count + tail.utf8.count)
+        body.append(Data(head.utf8))
+        body.append(fileData)
+        body.append(Data(tail.utf8))
         let data = try await send(
-            .post, "uploads", query: [], body: body,
+            .post, path, query: [], body: body,
             contentType: "multipart/form-data; boundary=\(boundary)",
-            timeout: Self.uploadTimeout
+            timeout: timeout
         )
-        return try decode(LinkResponse.self, from: data, path: "uploads")
+        return try decode(T.self, from: data, path: path)
     }
 
     // MARK: - Transport
@@ -103,15 +128,22 @@ final class APIClient {
         body: Data?,
         contentType: String,
         timeout: TimeInterval = APIClient.requestTimeout,
-        idempotencyKey: UUID? = nil
+        idempotencyKey: UUID? = nil,
+        headers: [String: String] = [:]
     ) async throws -> Data {
+        try OfflineWriteGuard.check(method, path: path, isOnline: connectivity?.isOnline ?? true)
         let request = try makeRequest(
             method, path, query: query, body: body,
-            contentType: contentType, timeout: timeout, idempotencyKey: idempotencyKey
+            contentType: contentType, timeout: timeout, idempotencyKey: idempotencyKey, headers: headers
         )
         let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError.transport(message: "Некорректный ответ сервера.")
+        }
+        if OfflineWriteGuard.isUnreachable(status: http.statusCode, body: data) {
+            connectivity?.serverUnreachable()
+        } else {
+            connectivity?.serverAnswered()
         }
         guard (200..<300).contains(http.statusCode) else {
             let error = APIError.from(status: http.statusCode, data: data)
@@ -130,6 +162,7 @@ final class APIClient {
         } catch let error as URLError {
             if error.code == .cancelled { throw CancellationError() }
             logger.error("Network error: \(error.localizedDescription, privacy: .public)")
+            if OfflineWriteGuard.isUnreachable(error.code) { connectivity?.serverUnreachable() }
             throw APIError.from(error)
         }
     }
@@ -142,7 +175,8 @@ final class APIClient {
         body: Data?,
         contentType: String,
         timeout: TimeInterval,
-        idempotencyKey: UUID? = nil
+        idempotencyKey: UUID? = nil,
+        headers: [String: String] = [:]
     ) throws -> URLRequest {
         let endpoint = serverURL.appending(path: "api").appending(path: path)
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
@@ -162,6 +196,9 @@ final class APIClient {
         }
         if let idempotencyKey {
             request.setValue(idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
+        }
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
         }
         if let body {
             request.httpBody = body

@@ -72,9 +72,14 @@ nonisolated enum ChatMarkdown {
 }
 
 nonisolated extension BotMessage {
-    /// The text of a bubble: the bot side's Markdown rendered, a client's text as typed.
+    private static let photoLabel = "[Фото]"
+
+    /// The text of a bubble: the bot side's Markdown rendered, a client's text as typed. Next to a kept photo only the
+    /// caption is left: the picture replaces the label.
     var displayText: AttributedString {
-        role == .user ? AttributedString(text) : ChatMarkdown.render(text)
+        guard role == .user else { return ChatMarkdown.render(text) }
+        guard photoFile != nil, text.hasPrefix(Self.photoLabel) else { return AttributedString(text) }
+        return AttributedString(text.dropFirst(Self.photoLabel.count).trimmingCharacters(in: .whitespaces))
     }
 
     /// The text with the markers stripped: for previews and VoiceOver.

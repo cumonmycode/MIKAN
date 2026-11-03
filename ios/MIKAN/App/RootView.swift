@@ -18,10 +18,17 @@ struct RootView: View {
             }
         }
         .animation(.smooth(duration: 0.35), value: appState.phase)
+        .appLock(appState.lock, signedIn: appState.phase == .signedIn)
+        .offlineMode(appState)
+        .onChange(of: appState.phase) { appState.lock.reset() }
         .task(id: isPolling) {
             guard isPolling else { return }
             await appState.refreshSession()
             await appState.runPolling()
+        }
+        // After sign-in (and on launch with a saved session): ask about notifications and register this iPhone.
+        .task(id: appState.phase) {
+            await appState.activatePush()
         }
     }
 }

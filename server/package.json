@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "eval:ai": "node --env-file-if-exists=.env --import tsx src/scripts/ai-eval.ts",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

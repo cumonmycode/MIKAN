@@ -2,7 +2,7 @@ import type { DbOrTx } from '../db/client.js';
 import { bookableMasters } from '../domain/free-slots.js';
 import { getStudioSettings } from '../domain/settings.js';
 import type { EmployeeRow } from '../lib/serialize.js';
-import { activeServices, nowLine, servicesSection, studioAboutSection } from './prompt.js';
+import { activeServices, masterNames, nowLine, servicesSection, studioAboutSection } from './prompt.js';
 
 /** System prompt of staff mode: a chat whose phone belongs to an active employee (see onboarding.ts). */
 
@@ -22,7 +22,7 @@ export function buildStaffStablePrompt(db: DbOrTx): string {
   return [
     STAFF_RULES.replace('тату- и пирсинг-студии', `тату- и пирсинг-студии «${studio.name}»`),
     `# Данные студии\n\n${studioAboutSection(db)}`,
-    servicesSection(activeServices(db)),
+    servicesSection(activeServices(db), masterNames(db)),
   ].join('\n\n');
 }
 

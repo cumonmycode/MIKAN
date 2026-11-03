@@ -63,14 +63,24 @@ nonisolated struct OpenReceiptItem: Decodable, Hashable, Sendable {
     var total: Int
     /// The size's current quantity; `nil` for services and a size that is gone.
     var stock: Int?
+    /// Set on a gift certificate to sell (a `service` line named «Подарочный сертификат»); `nil` on other lines.
+    var certificate: OpenReceiptCertificate? = nil
+}
+
+/// `OpenReceiptItem.certificate`: who the certificate to sell is for. It has no code until the sale issues it.
+nonisolated struct OpenReceiptCertificate: Decodable, Hashable, Sendable {
+    var recipientName: String?
+    var note: String?
 }
 
 nonisolated extension OpenReceiptItem {
     private enum CodingKeys: String, CodingKey {
         case type, productId, variantId, variantName, productKind, serviceId, name, quantity, price, total, stock
+        case certificate
     }
 
-    /// An unknown `productKind` reads as none (the line then shows the jewelry icon).
+    /// An unknown `productKind` reads as none (the line then shows the jewelry icon); an unreadable `certificate`
+    /// as none.
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         type = try c.decode(SaleItemType.self, forKey: .type)
@@ -84,5 +94,6 @@ nonisolated extension OpenReceiptItem {
         price = try c.decode(Int.self, forKey: .price)
         total = try c.decodeIfPresent(Int.self, forKey: .total) ?? quantity * price
         stock = try c.decodeIfPresent(Int.self, forKey: .stock)
+        certificate = try? c.decodeIfPresent(OpenReceiptCertificate.self, forKey: .certificate)
     }
 }

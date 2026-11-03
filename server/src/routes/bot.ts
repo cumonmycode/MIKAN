@@ -21,6 +21,7 @@ import {
   storeMessage,
   updateChatFlags,
 } from '../domain/bot-chats.js';
+import { readChatPhoto } from '../domain/chat-photos.js';
 import { AppError, badRequest, conflict, notFound } from '../lib/errors.js';
 import { knowledgeOut } from '../lib/serialize.js';
 import { toIso } from '../lib/time.js';
@@ -54,6 +55,14 @@ export function botRoutes(app: FastifyInstance, ctx: AppContext): void {
     const q = parse(messagesQuery, request.query);
     getChat(db, chatId);
     return { items: serializeMessages(db, pageMessages(db, chatId, q.beforeId, q.limit)) };
+  });
+
+  app.get('/bot/photos/:file', async (request, reply) => {
+    const { file } = parse(z.object({ file: z.string() }), request.params);
+    const photo = await readChatPhoto(ctx.config.dataDir, file);
+    if (!photo) throw notFound('Фото не найдено');
+    // no-store: URLSession would otherwise keep a copy on the employee's phone, past sign-out.
+    return reply.header('Cache-Control', 'private, no-store').type(photo.mediaType).send(photo.data);
   });
 
   app.post('/bot/chats/:chatId/messages', async (request) => {

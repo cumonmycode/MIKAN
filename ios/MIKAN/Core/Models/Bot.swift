@@ -18,6 +18,9 @@ nonisolated struct BotMessage: Codable, Hashable, Identifiable, Sendable {
     let text: String
     let employee: EmployeeRef?
     let createdAt: Date
+    /// The picture a client sent, for `GET /bot/photos/:file`. `nil` for other messages, for photos received before
+    /// the server kept them and on older servers: those show only the `[Фото]` label.
+    var photoFile: String?
 }
 
 nonisolated struct BotChat: Codable, Hashable, Identifiable, Sendable {
@@ -52,6 +55,34 @@ nonisolated struct ClientChatResponse: Codable, Sendable {
 nonisolated enum ScheduledKind: String, Codable, Sendable {
     case aftercare
     case reminder
+    /// «Как заживает?» some days after the visit.
+    case healingCheck = "healing_check"
+    /// A jewelry change suggested some weeks after the visit.
+    case jewelryChange = "jewelry_change"
+    /// «Ваша запись перенесена»: staff moved the appointment and asked to tell the client.
+    case rescheduleNotice = "reschedule_notice"
+    /// A kind this build does not know yet (sent by a newer server); never sent by the app.
+    case other
+
+    /// Badge of the queued message.
+    var title: String {
+        switch self {
+        case .aftercare: "Уход"
+        case .reminder: "Напоминание"
+        case .healingCheck: "Вопрос о заживлении"
+        case .jewelryChange: "Замена украшения"
+        case .rescheduleNotice: "Перенос записи"
+        case .other: "Сообщение"
+        }
+    }
+}
+
+nonisolated extension ScheduledKind {
+    /// An unknown kind reads as `.other`, so a newer server never breaks the queue.
+    init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ScheduledKind(rawValue: raw) ?? .other
+    }
 }
 
 nonisolated enum ScheduledStatus: String, Codable, CaseIterable, Sendable {

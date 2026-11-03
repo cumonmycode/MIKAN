@@ -3,10 +3,11 @@ import { DateTime } from 'luxon';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import { services } from '../db/schema.js';
-import { bookableMasters, freeSlots, SLOT_HORIZON_DAYS, SLOT_STEP_MIN } from '../domain/free-slots.js';
+import { certificateBalanceText } from '../domain/certificate-views.js';
+import { bookableMasters, freeSlots } from '../domain/free-slots.js';
 import { findClientByChat } from '../domain/clients.js';
 import { serviceIdsByProduct } from '../domain/products.js';
-import { studioTimezone } from '../domain/settings.js';
+import { getStudioSettings, studioTimezone } from '../domain/settings.js';
 import { formatThickness, threadLabel } from '../lib/jewelry.js';
 import { formatRub } from '../lib/text.js';
 import { formatHumanDateTime, formatTime, localDate, MINUTE_MS } from '../lib/time.js';
@@ -37,6 +38,7 @@ const slotsInput = z.object({
   masterId: z.number().int().positive().nullish(),
 });
 const rescheduleInput = z.object({ appointmentId: z.number().int().positive(), startsAt: z.string().trim().min(10).max(40) });
+const certificateInput = z.object({ code: z.string().trim().min(1).max(40) });
 
 const error = (content: string): ToolResult => ({ content, isError: true });
 
@@ -52,6 +54,14 @@ export function buildClientToolHandlers(ctx: AppContext, scope: ToolScope, sink:
    */
   const linkedClientId = (): number | null => (scope.chatId === null ? null : (findClientByChat(db, scope.chatId)?.id ?? null));
   return {
+    // Read-only, so the test mode answers exactly like a live chat.
+    certificate_balance: async (raw) => {
+      const parsed = certificateInput.safeParse(raw);
+      if (!parsed.success) return error('Некорректные данные: передай код сертификата, как его написал клиент.');
+      const answer = certificateBalanceText(db, parsed.data.code);
+      return answer.found ? { content: answer.text } : error(answer.text);
+    },
+
     show_jewelry_for_service: async (raw) => {
       const parsed = serviceInput.safeParse(raw);
       if (!parsed.success) return error('Некорректные данные: нужен id услуги из раздела «Услуги и цены».');
@@ -123,13 +133,13 @@ export function buildClientToolHandlers(ctx: AppContext, scope: ToolScope, sink:
       const parsed = slotsInput.safeParse(raw);
       if (!parsed.success) return error('Некорректные данные: дата нужна в формате ГГГГ-ММ-ДД.');
       const input = parsed.data;
-      const tz = studioTimezone(db);
+      const { timezone: tz, onlineBooking: online } = getStudioSettings(db);
       const now = Date.now();
       const day = DateTime.fromISO(input.date, { zone: tz });
       if (!day.isValid) return error('Такой даты нет. Дата нужна в формате ГГГГ-ММ-ДД.');
       if (input.date < localDate(now, tz)) return error('Эта дата уже прошла. Уточни у клиента другую дату.');
-      if (day.diff(DateTime.fromMillis(now, { zone: tz }).startOf('day'), 'days').days > SLOT_HORIZON_DAYS) {
-        return error(`Можно смотреть не дальше чем на ${SLOT_HORIZON_DAYS} дней вперёд.`);
+      if (day.diff(DateTime.fromMillis(now, { zone: tz }).startOf('day'), 'days').days > online.horizonDays) {
+        return error(`Можно смотреть не дальше чем на ${online.horizonDays} дней вперёд.`);
       }
       let durationMin = DEFAULT_SLOT_MINUTES;
       let masterId = input.masterId ?? undefined;
@@ -153,15 +163,15 @@ export function buildClientToolHandlers(ctx: AppContext, scope: ToolScope, sink:
       if (masterId !== undefined && bookableMasters(db, masterId).length === 0) return error('Такого мастера нет.');
       const result = freeSlots(db, { date: input.date, durationMin, masterId, excludeAppointmentId, now });
       const dayTitle = formatHumanDateTime(day.startOf('day').toMillis(), tz).replace(/ в \d{2}:\d{2}$/, '');
-      const lines = result.map(({ master, starts }) =>
-        `• ${master.name} [id ${master.id}]: ${starts.length ? starts.map((s) => formatTime(s, tz)).join(', ') : 'нет свободного времени'}`,
+      const lines = result.map(({ master, off, starts }) =>
+        `• ${master.name} [id ${master.id}]: ${off ? 'не работает в этот день' : starts.length ? starts.map((s) => formatTime(s, tz)).join(', ') : 'нет свободного времени'}`,
       );
       const anyFree = result.some((r) => r.starts.length > 0);
       return {
         content:
-          `Свободное время на ${dayTitle} (${input.date}), ${note}, шаг ${SLOT_STEP_MIN} мин:\n${lines.join('\n')}\n` +
+          `Свободное время на ${dayTitle} (${input.date}), ${note}, шаг ${online.stepMinutes} мин:\n${lines.join('\n')}\n` +
           (anyFree
-            ? `Для reschedule_appointment передавай startsAt в виде «${input.date} ЧЧ:ММ», например «${studioDateTimeText(result.find((r) => r.starts.length)!.starts[0]!, tz)}».`
+            ? `Для book_appointment и reschedule_appointment передавай startsAt в виде «${input.date} ЧЧ:ММ», например «${studioDateTimeText(result.find((r) => r.starts.length)!.starts[0]!, tz)}».`
             : 'Свободного времени нет — предложи другую дату.'),
       };
     },

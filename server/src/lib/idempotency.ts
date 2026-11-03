@@ -37,6 +37,63 @@ function requestHash(endpoint: string, body: unknown): string {
   return createHash('sha256').update(`${endpoint}\n${canonicalJson(body ?? null)}`).digest('hex');
 }
 
+/** Prunes expired keys and returns the stored response of `key`, `409` when it was stored for another request. */
+function storedResponse(db: DbOrTx, scope: number, key: string, hash: string, now: number): { json: string } | null {
+  db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, now - IDEMPOTENCY_TTL_MS)).run();
+  const stored = db
+    .select()
+    .from(idempotencyKeys)
+    .where(and(eq(idempotencyKeys.employeeId, scope), eq(idempotencyKeys.key, key)))
+    .get();
+  if (!stored) return null;
+  if (stored.requestHash !== hash) throw conflict('Повторный запрос отличается от исходного. Обновите экран и попробуйте снова.');
+  return { json: stored.responseJson };
+}
+
+/** Keys of the public booking API (no employee): stored with `employee_id` 0. */
+export const PUBLIC_IDEMPOTENCY_SCOPE = 0;
+
+/** Async runs in progress per database, so a retry arriving meanwhile waits and replays instead of running twice. */
+const running = new WeakMap<Db, Map<string, Promise<unknown>>>();
+
+/**
+ * `idempotent` for an asynchronous write (one that awaits a bank or Telegram): the same rules, for keys of `scope`.
+ * The response is stored once `run` succeeds; a repeat arriving while it runs waits for it, then replays it.
+ */
+export async function idempotentAsync<T>(
+  db: Db,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  scope: number,
+  run: () => Promise<T>,
+): Promise<T> {
+  const key = idempotencyKeyOf(request);
+  if (!key) return run();
+  const endpoint = `${request.method} ${request.url.split('?')[0]}`;
+  const hash = requestHash(endpoint, request.body);
+  const inFlight = running.get(db) ?? new Map<string, Promise<unknown>>();
+  running.set(db, inFlight);
+  const slot = `${scope}:${key}`;
+  for (let previous = inFlight.get(slot); previous; previous = inFlight.get(slot)) await previous.catch(() => undefined);
+  const stored = storedResponse(db, scope, key, hash, Date.now());
+  if (stored) {
+    reply.header(REPLAYED_HEADER, 'true');
+    return JSON.parse(stored.json) as T;
+  }
+  const work = run();
+  inFlight.set(slot, work);
+  try {
+    const response = await work;
+    db.insert(idempotencyKeys)
+      .values({ key, employeeId: scope, endpoint, requestHash: hash, responseJson: JSON.stringify(response), createdAt: Date.now() })
+      .onConflictDoNothing()
+      .run();
+    return response;
+  } finally {
+    if (inFlight.get(slot) === work) inFlight.delete(slot);
+  }
+}
+
 /**
  * Runs a write at most once per `Idempotency-Key` (per employee, kept 24 h).
  *
@@ -56,18 +113,10 @@ export function idempotent<T>(db: Db, request: FastifyRequest, reply: FastifyRep
 
   return db.transaction((tx) => {
     const now = Date.now();
-    tx.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, now - IDEMPOTENCY_TTL_MS)).run();
-    const stored = tx
-      .select()
-      .from(idempotencyKeys)
-      .where(and(eq(idempotencyKeys.employeeId, employeeId), eq(idempotencyKeys.key, key)))
-      .get();
+    const stored = storedResponse(tx, employeeId, key, hash, now);
     if (stored) {
-      if (stored.requestHash !== hash) {
-        throw conflict('Повторный запрос отличается от исходного. Обновите экран и попробуйте снова.');
-      }
       reply.header(REPLAYED_HEADER, 'true');
-      return JSON.parse(stored.responseJson) as T;
+      return JSON.parse(stored.json) as T;
     }
     const response = run(tx);
     tx.insert(idempotencyKeys)

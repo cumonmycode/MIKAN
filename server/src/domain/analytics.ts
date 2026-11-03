@@ -1,6 +1,7 @@
 import type { DbOrTx } from '../db/client.js';
 import { toIso } from '../lib/time.js';
 import { itemBreakdown, type ItemBreakdown } from './analytics-items.js';
+import { loyaltySection } from './analytics-loyalty.js';
 import { cashSection, stockExpenses, stockOnHand, type StockExpenses } from './analytics-operations.js';
 import {
   appointmentGroups,
@@ -94,5 +95,6 @@ export function reportAnalytics(db: DbOrTx, from: number, to: number) {
     masters: mastersSection(db, current.sales, current.groups),
     clients: clientsSection(db, current.sales, from, to, current.newClients),
     appointments: current.appointments,
+    loyalty: loyaltySection(db, from, to),
   };
 }

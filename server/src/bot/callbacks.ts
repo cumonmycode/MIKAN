@@ -9,6 +9,7 @@ import { sizedName } from '../lib/jewelry.js';
 import type { ProductRow, VariantRow } from '../lib/serialize.js';
 import { formatRub, formatServicePrice } from '../lib/text.js';
 import { formatHumanDateTime } from '../lib/time.js';
+import { isSmmCallback, onSmmCallback } from '../smm/tg-handlers.js';
 import { decodeCallback, encodeCallback, type CallbackAction, type JewelryList } from './callback-data.js';
 import {
   jewelryCategoriesMenu,
@@ -22,11 +23,18 @@ import {
   sizeKeyboard,
   type CurrentMessage,
 } from './catalog.js';
+import { birthdaySkipButton } from './birthday.js';
 import { appointmentWhat, confirmForClient, ownActiveAppointment } from './client-appointments.js';
+import { followUpButton } from './follow-ups.js';
 import type { InlineKeyboard } from './gateway.js';
+import { marketingButton } from './marketing.js';
 import type { BotPipeline, IncomingFrom } from './pipeline.js';
 
-/** Inline buttons: catalog paging and choices, and the reminder buttons. */
+/**
+ * Inline buttons: catalog paging and choices, the reminder buttons, the follow-up buttons (bot/follow-ups.ts), the
+ * buttons under news messages (bot/marketing.ts), «Пропустить» under the birthday question (bot/birthday.ts) and the
+ * SMM buttons of staff (smm/tg-handlers.ts).
+ */
 
 export interface CallbackDeps {
   ctx: AppContext;
@@ -66,6 +74,10 @@ export function jewelryChoiceText(product: ProductRow, size: VariantRow | null, 
 }
 
 export async function handleCallback(deps: CallbackDeps, query: CallbackQueryInput): Promise<CallbackAnswer> {
+  // SMM buttons under previews and hand-offs (staff chats only; see smm/tg-handlers.ts).
+  if (isSmmCallback(query.data)) {
+    return onSmmCallback(deps.ctx, { chatId: query.from.chatId, data: query.data, messageId: query.message?.messageId ?? null });
+  }
   const action = decodeCallback(query.data);
   if (!action) return { text: 'Эта кнопка устарела' };
   try {
@@ -143,6 +155,20 @@ async function dispatch(deps: CallbackDeps, query: CallbackQueryInput, action: C
     case 'reminderConfirm':
     case 'reminderMove':
       return reminderButton(deps, query, action.kind, action.appointmentId);
+
+    case 'healingOk':
+    case 'healingQuestion':
+    case 'jewelryChangeBook':
+    case 'jewelryChangeLater':
+      return followUpButton(deps, query, action);
+
+    case 'marketingOptOut':
+    case 'marketingOptIn':
+    case 'marketingBook':
+      return marketingButton(deps, query, action);
+
+    case 'birthdaySkip':
+      return birthdaySkipButton(deps, query);
   }
 }
 

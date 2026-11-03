@@ -2,11 +2,12 @@ import type { DbOrTx } from '../db/client.js';
 import type { ProductRow, SaleItemRow, VariantRow } from '../lib/serialize.js';
 import type { PeriodSales } from './analytics-sales.js';
 import { productsByIds, servicesByIds, variantsByIds } from './refs.js';
-import { allocateDiscount } from './reports.js';
+import { isCertificateLine, keptLineRevenues, keptUnits } from './sale-revenue.js';
 
 /**
  * Item-level breakdown of the kept sales: services by category, products by kind with cost of goods sold and margin,
- * and the tops. Item revenue is net of the sale discount (`allocateDiscount`).
+ * and the tops. Each line counts by its kept units (what refunds have not returned) and their revenue, net of the sale
+ * discount and the bonuses paid (`keptLineRevenues`); gift certificate lines are not revenue and are left out.
  */
 
 export const ANALYTICS_TOP_LIMIT = 20;
@@ -111,21 +112,23 @@ export function itemBreakdown(db: DbOrTx, s: PeriodSales) {
 
   for (const sale of s.kept) {
     const items = s.itemsBySale.get(sale.id) ?? [];
-    const net = allocateDiscount(items, sale.discount);
+    const net = keptLineRevenues(sale, items);
     items.forEach((item, index) => {
       const value = net[index] ?? 0;
+      const quantity = keptUnits(item);
+      if (isCertificateLine(item) || quantity <= 0) return;
       if (item.type === 'product') {
         const product = item.productId != null ? lookups.products.get(item.productId) : undefined;
         const kind = product?.kind ?? FALLBACK_KIND;
         const cost = unitCostOf(item, lookups);
-        addSold(productTotals, item.quantity, value, cost);
+        addSold(productTotals, quantity, value, cost);
         const kindSums = kinds.get(kind) ?? emptySums();
         kinds.set(kind, kindSums);
-        addSold(kindSums, item.quantity, value, cost);
+        addSold(kindSums, quantity, value, cost);
         const key = `p${item.productId ?? item.name}`;
         const entry = productTop.get(key) ?? { productId: item.productId, name: product?.name ?? item.name, kind, sums: emptySums(), sizes: new Map() };
         productTop.set(key, entry);
-        addSold(entry.sums, item.quantity, value, cost);
+        addSold(entry.sums, quantity, value, cost);
         if (item.variantId != null) {
           const size = entry.sizes.get(item.variantId) ?? {
             variantId: item.variantId,
@@ -133,19 +136,19 @@ export function itemBreakdown(db: DbOrTx, s: PeriodSales) {
             sums: emptySums(),
           };
           entry.sizes.set(item.variantId, size);
-          addSold(size.sums, item.quantity, value, cost);
+          addSold(size.sums, quantity, value, cost);
         }
         return;
       }
       const catalog = item.serviceId != null ? lookups.serviceNames.get(item.serviceId) : undefined;
       const category = catalog?.category ?? FALLBACK_CATEGORY;
-      servicesQuantity += item.quantity;
+      servicesQuantity += quantity;
       servicesRevenue += value;
       const cat = categories.get(category) ?? { category, quantity: 0, revenue: 0 };
-      categories.set(category, { ...cat, quantity: cat.quantity + item.quantity, revenue: cat.revenue + value });
+      categories.set(category, { ...cat, quantity: cat.quantity + quantity, revenue: cat.revenue + value });
       const key = item.serviceId != null ? `s${item.serviceId}` : `n${item.name.toLowerCase()}`;
       const top = serviceTop.get(key) ?? { serviceId: item.serviceId, name: catalog?.name ?? item.name, category, quantity: 0, revenue: 0 };
-      serviceTop.set(key, { ...top, quantity: top.quantity + item.quantity, revenue: top.revenue + value });
+      serviceTop.set(key, { ...top, quantity: top.quantity + quantity, revenue: top.revenue + value });
     });
   }
 

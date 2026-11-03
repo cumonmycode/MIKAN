@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
 import {
+  CLIENT_NOTES_MAX,
   cleanTelegramNick,
   clientHistory,
   clientStats,
@@ -11,12 +12,15 @@ import {
   updateClient,
 } from '../domain/clients.js';
 import { findClientChat, serializeChat } from '../domain/bot-chats.js';
+import { dismissDuplicates, listDuplicates } from '../domain/client-duplicates.js';
+import { mergeClients } from '../domain/client-merge.js';
 import { historyEntries } from '../domain/history.js';
+import { clientLoyalty } from '../domain/loyalty.js';
 import { getClientRow, serializeAppointments, serializeSales } from '../domain/refs.js';
 import { conflict } from '../lib/errors.js';
-import { clientOut } from '../lib/serialize.js';
+import { clientOut, type ClientRow } from '../lib/serialize.js';
 import {
-  calendarDate,
+  birthdayDate,
   idParams,
   nonNull,
   nullableText,
@@ -44,8 +48,8 @@ const fields = {
   phone: phoneInput,
   instagram: nullableText(100),
   telegramNick,
-  birthday: calendarDate,
-  notes: nullableText(5000),
+  birthday: birthdayDate,
+  notes: nullableText(CLIENT_NOTES_MAX),
   source: nullableText(100),
 };
 
@@ -55,12 +59,24 @@ const createBody = z.object({
   // Required for new clients; older rows without a phone stay valid (see updateClient).
   phone: phoneInput.refine((phone) => phone != null, { message: 'обязательное поле' }),
   botEnabled: nonNull(z.boolean()),
+  marketingOptOut: nonNull(z.boolean()),
 });
 const patchBody = z.object({
   name: nonNull(requiredText(200)),
   ...fields,
   botEnabled: nonNull(z.boolean()),
+  marketingOptOut: nonNull(z.boolean()),
   archived: nonNull(z.boolean()),
+});
+const clientId = z.number().int().positive();
+const mergeBody = z.object({ intoId: clientId });
+/** Distinct ids of the cards that are different people (a group of the duplicates list). */
+const dismissBody = z.object({
+  clientIds: z
+    .array(clientId)
+    .min(2)
+    .max(500)
+    .refine((ids) => new Set(ids).size === ids.length, { message: 'карточки не должны повторяться' }),
 });
 const listQuery = pagination.extend({
   search: z.string().trim().max(100).optional(),
@@ -69,6 +85,8 @@ const listQuery = pagination.extend({
 
 export function clientRoutes(app: FastifyInstance, ctx: AppContext): void {
   const { db } = ctx;
+  /** The client card: with its stats and loyalty (lists leave both out). */
+  const card = (row: ClientRow) => clientOut(row, clientStats(db, row.id), clientLoyalty(db, row));
 
   app.get('/clients', async (request) => {
     const q = parse(listQuery, request.query);
@@ -76,22 +94,34 @@ export function clientRoutes(app: FastifyInstance, ctx: AppContext): void {
     return { items: rows.map((r) => clientOut(r)), total };
   });
 
+  app.get('/clients/duplicates', async () => ({ items: listDuplicates(db) }));
+
+  app.post('/clients/duplicates/dismiss', async (request, reply) => {
+    const input = parse(dismissBody, request.body);
+    dismissDuplicates(db, input.clientIds);
+    return reply.code(204).send();
+  });
+
+  app.post('/clients/:id/merge', async (request) => {
+    const { id } = parse(idParams, request.params);
+    const input = parse(mergeBody, request.body);
+    return card(mergeClients(db, id, input.intoId));
+  });
+
   app.get('/clients/:id', async (request) => {
     const { id } = parse(idParams, request.params);
-    return clientOut(getClientRow(db, id), clientStats(db, id));
+    return card(getClientRow(db, id));
   });
 
   app.post('/clients', async (request) => {
     const input = parse(createBody, request.body);
-    const row = createClient(db, input);
-    return clientOut(row, clientStats(db, row.id));
+    return card(createClient(db, input));
   });
 
   app.patch('/clients/:id', async (request) => {
     const { id } = parse(idParams, request.params);
     const input = parse(patchBody, request.body);
-    const row = updateClient(db, id, input);
-    return clientOut(row, clientStats(db, id));
+    return card(updateClient(db, id, input));
   });
 
   app.get('/clients/:id/history', async (request) => {

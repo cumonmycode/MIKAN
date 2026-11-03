@@ -48,18 +48,34 @@ nonisolated extension MovementType {
 
 /// Texts of a stock movement row.
 nonisolated enum MovementText {
-    /// «Покупка · 3 500 ₽», «Приход · +5 шт · 6 000 ₽» for a receipt recorded with its cost, the type's name otherwise.
+    /// «Покупка · 3 500 ₽», «Приход · +5 шт · 6 000 ₽» for a receipt recorded with its cost, the operation's name
+    /// otherwise. A receipt of a delivery reads «Поставка №4».
     static func title(_ movement: StockMovement, unit: String = ProductLimits.defaultUnit) -> String {
-        guard let amount = movement.amount else { return movement.type.title }
+        let name = operation(movement)
+        guard let amount = movement.amount else { return name }
         switch movement.type {
         case .purchase:
-            return "\(movement.type.title) · \(Money.format(amount))"
+            return "\(name) · \(Money.format(amount))"
         case .receipt:
             let quantity = InventoryText.quantity(movement.delta, unit: unit)
-            return "\(movement.type.title) · +\(quantity) · \(Money.format(amount))"
+            return "\(name) · +\(quantity) · \(Money.format(amount))"
         default:
-            return movement.type.title
+            return name
         }
+    }
+
+    /// «Приход», «Поставка №4»…
+    static func operation(_ movement: StockMovement) -> String {
+        isDelivery(movement) ? DeliveryText.movementTitle(note: movement.note) : movement.type.title
+    }
+
+    /// The note under the row; a delivery receipt leaves out «Поставка №4» that its title already says.
+    static func note(_ movement: StockMovement) -> String? {
+        isDelivery(movement) ? DeliveryText.movementNote(movement.note) : movement.note.nonEmpty
+    }
+
+    static func isDelivery(_ movement: StockMovement) -> Bool {
+        movement.type == .receipt && movement.deliveryId != nil
     }
 
     /// «15 окт., 14:00 · Анна»; the list of all products starts with the operation: «Покупка · 3 500 ₽ · …».
@@ -80,6 +96,8 @@ struct MovementRow: View {
     var showsProduct = false
     /// The product's unit, for a receipt with its cost («+5 шт»).
     var unit = ProductLimits.defaultUnit
+    /// A chevron: the row opens something (its delivery) outside a list, which draws none itself.
+    var showsDisclosure = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -100,13 +118,20 @@ struct MovementRow: View {
                 Text(MovementText.subtitle(movement, showsProduct: showsProduct, unit: unit))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let note = movement.note.nonEmpty {
+                if let note = MovementText.note(movement) {
                     Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
             Spacer(minLength: 8)
             if movement.movesStock {
                 stockChange
+            }
+            if showsDisclosure {
+                Image(systemName: "chevron.forward")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxHeight: .infinity)
+                    .accessibilityHidden(true)
             }
         }
         .accessibilityElement(children: .combine)

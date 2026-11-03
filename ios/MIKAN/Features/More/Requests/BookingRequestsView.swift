@@ -31,6 +31,8 @@ struct BookingRequestsView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppState.self) private var appState
     @State private var status: BookingStatus = .new
+    /// The filter on screen: cleared only for another one, not when the screen reappears after a swipe back.
+    @State private var shownStatus: BookingStatus?
     @State private var requests = Remote<[BookingRequest]>()
 
     var body: some View {
@@ -73,7 +75,8 @@ struct BookingRequestsView: View {
         }
         .refreshable { await load() }
         .task(id: status) {
-            requests.reset()
+            if shownStatus != status { requests.reset() }
+            shownStatus = status
             await load()
         }
         .remoteErrorAlert(requests)

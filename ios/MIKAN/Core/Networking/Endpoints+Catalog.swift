@@ -3,12 +3,15 @@ import Foundation
 // MARK: - Services, aftercare templates, products, stock, uploads
 
 extension APIClient {
+    /// Kept on the phone for offline use.
     func services(includeInactive: Bool = false) async throws -> [Service] {
-        let response: ItemsResponse<Service> = try await request(
-            .get, "services",
-            query: queryItems(["includeInactive": includeInactive ? "true" : nil])
-        )
-        return response.items
+        try await cachedGet(.services(includeInactive: includeInactive)) {
+            let response: ItemsResponse<Service> = try await request(
+                .get, "services",
+                query: queryItems(["includeInactive": includeInactive ? "true" : nil])
+            )
+            return response.items
+        }
     }
 
     func createService(_ body: ServiceBody) async throws -> Service {
@@ -59,13 +62,18 @@ extension APIClient {
         lowStock: Bool = false,
         includeInactive: Bool = false
     ) async throws -> [Product] {
-        let response: ItemsResponse<Product> = try await request(.get, "products", query: queryItems([
-            "kind": kind?.rawValue,
-            "search": search.nonEmpty,
-            "lowStock": lowStock ? "true" : nil,
-            "includeInactive": includeInactive ? "true" : nil,
-        ]))
-        return response.items
+        let fetch = {
+            let response: ItemsResponse<Product> = try await self.request(.get, "products", query: queryItems([
+                "kind": kind?.rawValue,
+                "search": search.nonEmpty,
+                "lowStock": lowStock ? "true" : nil,
+                "includeInactive": includeInactive ? "true" : nil,
+            ]))
+            return response.items
+        }
+        // A whole kind (with its sizes) is kept on the phone for offline use; searches and filters are not.
+        guard let kind, search.isEmpty, !lowStock else { return try await fetch() }
+        return try await cachedGet(.products(kind: kind, includeInactive: includeInactive), fetch)
     }
 
     func product(id: Int) async throws -> Product {
@@ -78,6 +86,12 @@ extension APIClient {
 
     func updateProduct(id: Int, _ body: ProductBody) async throws -> Product {
         try await request(.patch, "products/\(id)", body: body)
+    }
+
+    /// Moves the product into a category of its section (the server registers a new name), or out of any (`nil`);
+    /// nothing else on the card changes.
+    func setProductCategory(id: Int, category: String?) async throws -> Product {
+        try await request(.patch, "products/\(id)", body: ProductCategoryBody(category: Nullable(category?.nonEmpty)))
     }
 
     /// Deletes a product without history and archives one with it; `writeOff` first writes the stock left off
@@ -152,10 +166,15 @@ extension APIClient {
 
 extension APIClient {
     func catalogCategories(section: CatalogSection? = nil) async throws -> [CatalogCategory] {
-        let response: ItemsResponse<CatalogCategory> = try await request(
-            .get, "catalog/categories", query: queryItems(["section": section?.rawValue])
-        )
-        return response.items
+        let fetch = {
+            let response: ItemsResponse<CatalogCategory> = try await self.request(
+                .get, "catalog/categories", query: queryItems(["section": section?.rawValue])
+            )
+            return response.items
+        }
+        // Every section's categories are kept on the phone for offline use.
+        guard section == nil else { return try await fetch() }
+        return try await cachedGet(.categories, fetch)
     }
 
     func createCategory(_ body: CategoryCreateBody) async throws -> CatalogCategory {

@@ -92,6 +92,76 @@
       "when": 1792350851599,
       "tag": "0013_product_archived",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792409288753,
+      "tag": "0014_service_followups",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792411069922,
+      "tag": "0015_team_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1792414315462,
+      "tag": "0016_online_booking",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792428482451,
+      "tag": "0017_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792441642217,
+      "tag": "0018_auth_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792444177700,
+      "tag": "0019_client_cabinet",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792447105758,
+      "tag": "0020_birthday_asked",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1792459072526,
+      "tag": "0021_stage_till_refunds_deliveries",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1793204346065,
+      "tag": "0022_smm",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1793698958840,
+      "tag": "0023_bot_message_photo",
+      "breakpoints": true
     }
   ]
 }

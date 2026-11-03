@@ -1,4 +1,5 @@
 import type * as s from '../db/schema.js';
+import type { AppointmentCancellationOut } from '../domain/cancellation.js';
 import { toIso } from './time.js';
 
 type Row<T extends { $inferSelect: unknown }> = T['$inferSelect'];
@@ -13,6 +14,8 @@ export type AppointmentRow = Row<typeof s.appointments>;
 export type AppointmentServiceRow = Row<typeof s.appointmentServices>;
 export type SaleRow = Row<typeof s.sales>;
 export type SaleItemRow = Row<typeof s.saleItems>;
+export type SaleRefundRow = Row<typeof s.saleRefunds>;
+export type SaleRefundItemRow = Row<typeof s.saleRefundItems>;
 export type ShiftRow = Row<typeof s.cashShifts>;
 export type QrPaymentRow = Row<typeof s.qrPayments>;
 export type DepositOperationRow = Row<typeof s.depositOperations>;
@@ -50,6 +53,14 @@ export interface ServiceVariant {
   price: number;
   durationMin: number | null;
 }
+/** A master's own prices of a service (docs/API.md «Service» `masterPrices`). */
+export interface MasterPrice {
+  employeeId: number;
+  price: number;
+  priceMax: number | null;
+  /** Their price of a variant, by the variant's current name. */
+  variants: Array<{ name: string; price: number }>;
+}
 export interface ClientStats {
   visits: number;
   totalSpent: number;
@@ -66,6 +77,7 @@ export const employeeOut = (e: EmployeeRow) => ({
   phone: e.phone,
   color: e.color,
   isMaster: e.isMaster,
+  role: e.role,
   active: e.active,
   createdAt: toIso(e.createdAt),
 });
@@ -82,7 +94,14 @@ export const clientRef = (c: ClientRow): ClientRef => ({
   telegramLinked: c.telegramChatId != null,
 });
 
-export const clientOut = (c: ClientRow, stats: ClientStats | null = null) => ({
+/** `Client.loyalty` of the client card (domain/loyalty.ts); `null` in lists. */
+export interface ClientLoyalty {
+  bonusBalance: number;
+  expiring: { amount: number; at: string } | null;
+  birthdayDiscount: { percent: number; until: string } | null;
+}
+
+export const clientOut = (c: ClientRow, stats: ClientStats | null = null, loyalty: ClientLoyalty | null = null) => ({
   id: c.id,
   name: c.name,
   lastName: c.lastName,
@@ -98,7 +117,9 @@ export const clientOut = (c: ClientRow, stats: ClientStats | null = null) => ({
   archived: c.archived,
   createdAt: toIso(c.createdAt),
   updatedAt: toIso(c.updatedAt),
+  marketingOptOut: c.marketingOptOut,
   stats,
+  loyalty,
 });
 
 export const serviceRef = (sv: ServiceRow): ServiceRef => ({ id: sv.id, name: sv.name, category: sv.category });
@@ -118,8 +139,11 @@ export const serviceOut = (sv: ServiceRow) => ({
   photos: parsePhotos(sv.photosJson),
   variants: parseVariants(sv.variantsJson),
   depositAmount: sv.depositAmount,
+  masterPrices: parseMasterPrices(sv.masterPricesJson),
   aftercareTemplateId: sv.aftercareTemplateId,
   freshProcedure: sv.freshProcedure,
+  healingCheckDays: sv.healingCheckDays,
+  jewelryChangeWeeks: sv.jewelryChangeWeeks,
   active: sv.active,
   sort: sv.sort,
 });
@@ -141,6 +165,21 @@ export function parseVariants(json: string): ServiceVariant[] {
   return parseJsonArray(json)
     .filter((x): x is ServiceVariant => typeof (x as ServiceVariant)?.name === 'string' && typeof (x as ServiceVariant)?.price === 'number')
     .map((x) => ({ name: x.name, price: x.price, durationMin: typeof x.durationMin === 'number' ? x.durationMin : null }));
+}
+
+const isAmount = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+
+export function parseMasterPrices(json: string): MasterPrice[] {
+  return parseJsonArray(json)
+    .filter((x): x is MasterPrice => Number.isInteger((x as MasterPrice)?.employeeId) && isAmount((x as MasterPrice)?.price))
+    .map((x) => ({
+      employeeId: x.employeeId,
+      price: x.price,
+      priceMax: isAmount(x.priceMax) ? x.priceMax : null,
+      variants: (Array.isArray(x.variants) ? x.variants : [])
+        .filter((v) => typeof v?.name === 'string' && isAmount(v?.price))
+        .map((v) => ({ name: v.name, price: v.price })),
+    }));
 }
 
 export function parseSteps(json: string): AftercareStep[] {
@@ -231,6 +270,7 @@ export const movementOut = (m: MovementRow, productName: string, variantName: st
   saleId: m.saleId,
   appointmentId: m.appointmentId,
   revisionId: m.revisionId,
+  deliveryId: m.deliveryId,
   amount: m.amount,
   employee,
   createdAt: toIso(m.createdAt),
@@ -294,6 +334,8 @@ export const appointmentOut = (
   deposit: AppointmentDepositOut,
   /** Its open receipt in the POS (the visit has started). */
   receiptId: number | null,
+  /** What the studio's cancellation rules mean for it (see domain/cancellation.ts). */
+  cancellation: AppointmentCancellationOut | null,
 ) => ({
   id: a.id,
   client,
@@ -316,38 +358,111 @@ export const appointmentOut = (
   completedAt: toIso(a.completedAt),
   createdAt: toIso(a.createdAt),
   updatedAt: toIso(a.updatedAt),
+  cancellation,
+  channel: a.channel,
+  ...onlineOut(a),
 });
 export type AppointmentOut = ReturnType<typeof appointmentOut>;
 
-export const saleItemOut = (i: SaleItemRow) => ({
+/** Statuses in which an online booking may still wait to be settled. */
+const UNSETTLED_STATUSES = ['scheduled', 'confirmed'];
+
+/**
+ * `onlineState` / `holdUntil` of an appointment: an online booking not settled yet. Once it is closed (cancelled,
+ * completed, no-show) it waits for nothing, whatever the stored state says.
+ */
+function onlineOut(a: AppointmentRow): { onlineState: string | null; holdUntil: string | null } {
+  const onlineState = a.onlineState != null && UNSETTLED_STATUSES.includes(a.status) ? a.onlineState : null;
+  return { onlineState, holdUntil: onlineState === 'awaiting_payment' ? toIso(a.holdUntil) : null };
+}
+
+/**
+ * A sale line on the wire. A gift certificate line is stored as `certificate` and sent as `service` with
+ * `certificateId` and `certificateCode` (older builds know only `product` | `service`).
+ */
+export const saleItemOut = (i: SaleItemRow, certificateCode: string | null = null) => ({
   id: i.id,
-  type: i.type,
+  type: i.type === 'certificate' ? 'service' : i.type,
   productId: i.productId,
   variantId: i.variantId,
   variantName: i.variantName,
   serviceId: i.serviceId,
+  certificateId: i.certificateId,
+  certificateCode,
   name: i.name,
   quantity: i.quantity,
   price: i.price,
   total: i.total,
+  refundedQuantity: i.refundedQuantity,
 });
 
-export const saleOut = (sale: SaleRow, items: SaleItemRow[], client: ClientRef | null, employee: EmployeeRef) => ({
+/** A refund of a sale (docs/API.md «SaleRefund»); `items` carry the sale line's name. */
+export const saleRefundOut = (
+  r: SaleRefundRow,
+  items: Array<{ saleItemId: number; name: string; quantity: number; amount: number }>,
+  employee: EmployeeRef | null,
+) => ({
+  id: r.id,
+  saleId: r.saleId,
+  items,
+  amount: r.amount,
+  payments: {
+    cash: r.payCash,
+    card: r.payCard,
+    transfer: r.payTransfer,
+    qr: r.payQr,
+    deposit: r.payDeposit,
+    bonus: r.payBonus,
+    certificate: r.payCertificate,
+  },
+  bonusTakenBack: r.bonusTakenBack,
+  restock: r.restock,
+  reason: r.reason,
+  employee,
+  shiftId: r.shiftId,
+  createdAt: toIso(r.createdAt),
+});
+export type SaleRefundOut = ReturnType<typeof saleRefundOut>;
+
+export const saleOut = (
+  sale: SaleRow,
+  items: SaleItemRow[],
+  client: ClientRef | null,
+  employee: EmployeeRef,
+  /** Bonuses credited for the sale (0 when none). */
+  bonusEarned = 0,
+  /** Codes of the certificates its lines sold, by certificate id. */
+  certificateCodes: ReadonlyMap<number, string> = new Map(),
+  /** Its refunds, oldest first. */
+  refunds: SaleRefundOut[] = [],
+) => ({
   id: sale.id,
   number: sale.number,
   client,
   employee,
   appointmentId: sale.appointmentId,
   shiftId: sale.shiftId,
-  items: items.map(saleItemOut),
+  items: items.map((i) => saleItemOut(i, i.certificateId != null ? (certificateCodes.get(i.certificateId) ?? null) : null)),
   subtotal: sale.subtotal,
   discount: sale.discount,
   total: sale.total,
-  payments: { cash: sale.payCash, card: sale.payCard, transfer: sale.payTransfer, qr: sale.payQr, deposit: sale.payDeposit },
+  payments: {
+    cash: sale.payCash,
+    card: sale.payCard,
+    transfer: sale.payTransfer,
+    qr: sale.payQr,
+    deposit: sale.payDeposit,
+    bonus: sale.payBonus,
+    certificate: sale.payCertificate,
+  },
+  bonusEarned,
   status: sale.status,
   note: sale.note,
   refundedAt: toIso(sale.refundedAt),
   refundReason: sale.refundReason,
+  refundedTotal: sale.refundedTotal,
+  refunds,
+  receiptSentAt: toIso(sale.receiptSentAt),
   createdAt: toIso(sale.createdAt),
 });
 export type SaleOut = ReturnType<typeof saleOut>;
@@ -395,6 +510,7 @@ export const botMessageOut = (m: BotMessageRow, employee: EmployeeRef | null) =>
   role: m.role,
   text: m.text,
   employee,
+  photoFile: m.photoFile,
   createdAt: toIso(m.createdAt),
 });
 export type BotMessageOut = ReturnType<typeof botMessageOut>;

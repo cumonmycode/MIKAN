@@ -18,6 +18,22 @@ struct ChatMarkdownTests {
         BotMessage(id: 1, chatId: 1, role: role, text: text, employee: nil, createdAt: .distantPast)
     }
 
+    private func photoMessage(_ text: String) -> BotMessage {
+        BotMessage(id: 1, chatId: 1, role: .user, text: text, employee: nil, createdAt: .distantPast, photoFile: "a.jpg")
+    }
+
+    @Test("A kept photo replaces the label in the bubble, the caption stays")
+    func photoCaption() {
+        #expect(text(photoMessage("[Фото] он прям будто впивается").displayText) == "он прям будто впивается")
+        #expect(text(photoMessage("[Фото]").displayText).isEmpty)
+    }
+
+    @Test("Without a kept photo the label stays; previews and VoiceOver always have it")
+    func photoLabel() {
+        #expect(text(message(.user, "[Фото] заживает?").displayText) == "[Фото] заживает?")
+        #expect(photoMessage("[Фото] заживает?").plainText == "[Фото] заживает?")
+    }
+
     @Test("Plain text stays as is")
     func plainText() {
         let rendered = ChatMarkdown.render("Здравствуйте! Прокол хеликса — 3 000 ₽ 😊")

@@ -69,8 +69,10 @@ describe('cash register', () => {
     expect(closed.json().closedAt).not.toBeNull();
     expect((await t.api('GET', '/api/cash/shift/current')).json().shift).toBeNull();
 
-    // Sales without an open shift are allowed and not attached.
-    expect((await sell({ cash: 100 }, 100)).json().shiftId).toBeNull();
+    // Selling needs an open shift.
+    const noShiftSale = await sell({ cash: 100 }, 100);
+    expect(noShiftSale.statusCode).toBe(409);
+    expect(noShiftSale.json().error).toEqual({ code: 'conflict', message: 'Откройте кассовую смену, чтобы провести продажу' });
 
     const list = await t.api('GET', '/api/cash/shifts');
     expect(list.json().total).toBe(1);
