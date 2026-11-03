@@ -2,7 +2,8 @@ import Foundation
 
 /// When the app hides behind a blur and asks for Face ID or the passcode (docs/API.md «Sessions»): after a launch and
 /// after more than five minutes in the background. Leaving the app blurs it at once, so neither the app switcher nor
-/// the way back shows any data; coming back sooner simply removes the blur.
+/// the way back shows any data; coming back sooner simply removes the blur. On a call or while the screen is shared the
+/// blur waits for the background: the system's own interface keeps the scene inactive with the app still on screen.
 nonisolated struct AppLockRule: Equatable, Sendable {
     enum Cover: Equatable, Sendable {
         /// The content is visible.
@@ -55,6 +56,16 @@ nonisolated struct AppLockRule: Equatable, Sendable {
             cover = .locked
         } else {
             cover = .none
+        }
+    }
+
+    /// The scene is inactive. Normally the app is leaving the front; with `staysOnScreen` (a call, a shared screen) the
+    /// system's own interface is over the app, which is still on screen, so it counts as being in front.
+    mutating func becomeInactive(at instant: ContinuousClock.Instant, applies: Bool, staysOnScreen: Bool) {
+        if staysOnScreen {
+            becomeActive(at: instant, applies: applies)
+        } else {
+            resignActive(applies: applies)
         }
     }
 
