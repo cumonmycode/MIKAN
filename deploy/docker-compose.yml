@@ -13,6 +13,13 @@ services:
       PORT: "3000"
       DATA_DIR: /app/data
       TZ: UTC
+    # Since 2026-10-30 the Tomsk provider stalls TLS to the Cloudflare IPs that workers.dev resolves to
+    # (104.21.x, 172.67.x and most other ranges: TCP opens, the handshake never completes), so every
+    # Telegram call through the proxy worker timed out. 104.16.0–11.x (the npm registry's edge) still
+    # gets through and Cloudflare serves any hostname there, so TELEGRAM_PROXY_PIN in .env pins the worker
+    # to one of those as "<worker host>:<ip>". If it stalls too, swap in another IP (deploy/README.md).
+    extra_hosts:
+      - "${TELEGRAM_PROXY_PIN:-proxy-pin-unset.invalid:127.0.0.1}"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
