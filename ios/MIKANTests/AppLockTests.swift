@@ -89,6 +89,68 @@ struct AppLockRuleTests {
         #expect(rule.cover == .none)
     }
 
+    @Test("Inactive with nothing keeping the app on screen hides it, as leaving does")
+    func inactiveHides() {
+        var rule = AppLockRule(lockedAtLaunch: false)
+        rule.becomeInactive(at: start, applies: true, staysOnScreen: false)
+        #expect(rule.cover == .privacy)
+    }
+
+    @Test("On a call or a shared screen, inactive leaves the app visible")
+    func inactiveOnCall() {
+        var rule = AppLockRule(lockedAtLaunch: false)
+        rule.becomeInactive(at: start, applies: true, staysOnScreen: true)
+        #expect(rule.cover == .none)
+    }
+
+    @Test("A call that starts while the app is blurred takes the blur off; its end brings the blur back")
+    func callChangesWhileInactive() {
+        var rule = AppLockRule(lockedAtLaunch: false)
+        rule.becomeInactive(at: start, applies: true, staysOnScreen: false)
+        rule.becomeInactive(at: start, applies: true, staysOnScreen: true)
+        #expect(rule.cover == .none)
+        rule.becomeInactive(at: start, applies: true, staysOnScreen: false)
+        #expect(rule.cover == .privacy)
+    }
+
+    @Test("On a call the background still blurs, and coming back while inactive takes the blur off")
+    func backgroundOnCall() {
+        var rule = AppLockRule(lockedAtLaunch: false)
+        rule.becomeInactive(at: start, applies: true, staysOnScreen: true)
+        rule.enterBackground(at: start, applies: true)
+        #expect(rule.cover == .privacy)
+        rule.becomeInactive(at: start + .seconds(60), applies: true, staysOnScreen: true)
+        #expect(rule.cover == .none)
+        #expect(rule.backgroundSince == nil)
+    }
+
+    @Test("A call doesn't get around the lock: more than five minutes away still locks")
+    func longStayOnCall() {
+        var rule = AppLockRule(lockedAtLaunch: false)
+        rule.enterBackground(at: start, applies: true)
+        rule.becomeInactive(at: start + .seconds(301), applies: true, staysOnScreen: true)
+        #expect(rule.cover == .locked)
+    }
+
+    @Test("A call doesn't lift a lock that is already on")
+    func lockStaysOnCall() {
+        var rule = AppLockRule(lockedAtLaunch: true)
+        rule.becomeInactive(at: start, applies: true, staysOnScreen: true)
+        #expect(rule.cover == .locked)
+        rule.becomeInactive(at: start, applies: true, staysOnScreen: false)
+        #expect(rule.cover == .locked)
+    }
+
+    @Test("Coming up on a call counts as being back: the next stay is measured from there")
+    func stayAfterComingUpOnCall() {
+        var rule = AppLockRule(lockedAtLaunch: false)
+        rule.enterBackground(at: start, applies: true)
+        rule.becomeInactive(at: start + .seconds(270), applies: true, staysOnScreen: true)
+        rule.enterBackground(at: start + .seconds(271), applies: true)
+        rule.becomeActive(at: start + .seconds(540), applies: true)
+        #expect(rule.cover == .none)
+    }
+
     @Test("Switched off, signed out or no passcode: no blur and no lock")
     func notApplying() {
         var rule = AppLockRule(lockedAtLaunch: false)
