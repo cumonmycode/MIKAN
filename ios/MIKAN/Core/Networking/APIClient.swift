@@ -84,6 +84,11 @@ final class APIClient {
         _ = try await send(method, path, query: [], body: payload, contentType: "application/json")
     }
 
+    /// For endpoints answering with a file instead of JSON.
+    func requestData(_ method: HTTPMethod, _ path: String) async throws -> Data {
+        try await send(method, path, query: [], body: nil, contentType: "application/json")
+    }
+
     /// `POST /uploads` with a `multipart/form-data` field `file`.
     func uploadImage(jpegData: Data, filename: String = "photo.jpg") async throws -> LinkResponse {
         try await upload("uploads", data: jpegData, filename: filename, mimeType: "image/jpeg")

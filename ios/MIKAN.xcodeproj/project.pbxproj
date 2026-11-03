@@ -60,6 +60,7 @@
 		1D5EBB25C0F5A1BD2BA11675 /* ConsumableUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 175AFA2762F52B84FF8D0DBD /* ConsumableUsage.swift */; };
 		1D6D54B08466535048D3944A /* OnlineRejectSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64CDB14FC39A48EE1F4B0324 /* OnlineRejectSheet.swift */; };
 		1E094868B83F94329D627BA5 /* POSHubViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD95B65A438B170A097431DD /* POSHubViews.swift */; };
+		1E98FDD2F9337F3828EAB992 /* ChatPhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2670CAF478555E5EEB44977C /* ChatPhoto.swift */; };
 		1F0F1F22AA117CC823B1D66D /* ReceiptFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E94B3226DF0C73BEC0DFA08 /* ReceiptFlowView.swift */; };
 		1F14FE52E6A20204EC73051B /* InventoryFilterBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D188920E2AAC727542DBD6FB /* InventoryFilterBar.swift */; };
 		1F5BA278FECF9FF5E281C658 /* CategoryEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49B0E3EAF08A0531F9399AED /* CategoryEditing.swift */; };
@@ -636,6 +637,7 @@
 		24305D9E1B8FFE73B14319F3 /* CartStoreServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CartStoreServiceTests.swift; sourceTree = "<group>"; };
 		251EA52949CC23D105C42A84 /* CompletionSuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionSuccessView.swift; sourceTree = "<group>"; };
 		2561CFD00651E7F78C4D0091 /* CompleteConsumablesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompleteConsumablesSection.swift; sourceTree = "<group>"; };
+		2670CAF478555E5EEB44977C /* ChatPhoto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPhoto.swift; sourceTree = "<group>"; };
 		26986AFDFECB681D707BD541 /* SaleDetailSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaleDetailSections.swift; sourceTree = "<group>"; };
 		2845D12869F764947E4EAE9B /* Endpoints+Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Endpoints+Catalog.swift"; sourceTree = "<group>"; };
 		2864E111AFCF8747704DE849 /* SalesSearchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SalesSearchModel.swift; sourceTree = "<group>"; };
@@ -2070,6 +2072,7 @@
 			children = (
 				7CAE0D5C62902A35A20D7477 /* ChatBubble.swift */,
 				9D89B37D306D92924FFA220D /* ChatFilter.swift */,
+				2670CAF478555E5EEB44977C /* ChatPhoto.swift */,
 				D05D63525EABBCAF19A4D272 /* ChatRow.swift */,
 				24243E2A2B75BBAE69EBC518 /* ChatsListView.swift */,
 				7C205AFC64CEEB734DEAA36E /* ChatView.swift */,
@@ -2358,6 +2361,7 @@
 				76309DD8F4E8F5D8843615D0 /* ChatBubble.swift in Sources */,
 				C77F7C2827233510FC78C396 /* ChatFilter.swift in Sources */,
 				BDE89E4D2DC5CA5AAD423E12 /* ChatMarkdown.swift in Sources */,
+				1E98FDD2F9337F3828EAB992 /* ChatPhoto.swift in Sources */,
 				B108D06B7F8571FC436EA8E6 /* ChatRow.swift in Sources */,
 				A23D32AE105AFCDC898B7A75 /* ChatView.swift in Sources */,
 				BF3D38460619AC10ABBBBE8F /* ChatsListView.swift in Sources */,

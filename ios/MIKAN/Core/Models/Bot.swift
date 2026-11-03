@@ -18,6 +18,9 @@ nonisolated struct BotMessage: Codable, Hashable, Identifiable, Sendable {
     let text: String
     let employee: EmployeeRef?
     let createdAt: Date
+    /// The picture a client sent, for `GET /bot/photos/:file`. `nil` for other messages, for photos received before
+    /// the server kept them and on older servers: those show only the `[Фото]` label.
+    var photoFile: String?
 }
 
 nonisolated struct BotChat: Codable, Hashable, Identifiable, Sendable {

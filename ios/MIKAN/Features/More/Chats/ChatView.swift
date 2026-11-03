@@ -22,6 +22,8 @@ struct ChatView: View {
     @State private var sentCount = 0
     @State private var unlinkedCount = 0
     @State private var boundCount = 0
+    /// Presented from here: a row of the lazy list goes away when a new message scrolls the chat, and its cover with it.
+    @State private var viewedPhoto: ChatPhotoItem?
 
     private static let pageSize = 50
     private static let pollInterval: Duration = .seconds(5)
@@ -52,7 +54,7 @@ struct ChatView: View {
                             .foregroundStyle(.secondary)
                             .padding(.vertical, 6)
                     case .message(let message):
-                        ChatBubble(message: message)
+                        ChatBubble(message: message) { viewedPhoto = ChatPhotoItem(image: $0) }
                     }
                 }
             }
@@ -76,6 +78,7 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .task { await pollLoop() }
+        .fullScreenCover(item: $viewedPhoto) { ChatPhotoViewer(image: $0.image) }
         .errorAlert($errorMessage)
         .sensoryFeedback(.success, trigger: sentCount)
         .sensoryFeedback(.success, trigger: unlinkedCount)

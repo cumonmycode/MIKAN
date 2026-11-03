@@ -17,6 +17,11 @@ extension APIClient {
         return response.items
     }
 
+    /// The bytes of a picture a client sent (`BotMessage.photoFile`).
+    func chatPhoto(file: String) async throws -> Data {
+        try await requestData(.get, "bot/photos/\(file)")
+    }
+
     func sendChatMessage(chatId: Int64, text: String) async throws -> BotMessage {
         try await request(.post, "bot/chats/\(chatId)/messages", body: TextBody(text: text))
     }

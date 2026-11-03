@@ -3,6 +3,7 @@ import SwiftUI
 /// Message bubble: client on the left; AI / staff / automatic on the right with distinct tints and labels.
 struct ChatBubble: View {
     let message: BotMessage
+    var onOpenPhoto: (UIImage) -> Void = { _ in }
 
     private var isIncoming: Bool { message.role == .user }
 
@@ -16,12 +17,17 @@ struct ChatBubble: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
                 }
-                Text(message.displayText)
-                    .textSelection(.enabled)
-                    .foregroundStyle(foreground)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(background, in: .rect(cornerRadius: 18))
+                if let photoFile = message.photoFile {
+                    ChatPhoto(file: photoFile, onOpen: onOpenPhoto)
+                }
+                if !message.displayText.characters.isEmpty {
+                    Text(message.displayText)
+                        .textSelection(.enabled)
+                        .foregroundStyle(foreground)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(background, in: .rect(cornerRadius: 18))
+                }
                 Text(DateText.time(message.createdAt))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -29,7 +35,8 @@ struct ChatBubble: View {
             }
             if isIncoming { Spacer(minLength: 48) }
         }
-        .accessibilityElement(children: .combine)
+        // The photo keeps its own element: it is a button with its own state.
+        .accessibilityElement(children: message.photoFile == nil ? .combine : .contain)
         .accessibilityLabel(accessibilityText)
     }
 
