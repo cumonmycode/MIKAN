@@ -80,6 +80,7 @@ Three roles; the server checks every request (the app only hides what a role can
 | Services, products, categories, aftercare templates, stock movements, purchases, revisions, deliveries, image generation: write | ✓ | ✓ | — |
 | Deliveries and suppliers: read (`GET /stock/deliveries…`, `GET /stock/suppliers`) | ✓ | ✓ | ✓ |
 | Reports and analytics (`/reports/*`) | ✓ | ✓ | — |
+| Studio expenses (`/expenses…`, read and write) | ✓ | ✓ | — |
 | Settings (studio, bot), knowledge base, staff chat binding (`PUT/DELETE /bot/chats/:chatId/employee`), `POST /bot/test`: write | ✓ | ✓ | — |
 | Work schedules: read | ✓ | ✓ | ✓ |
 | Work schedules: change | ✓ | ✓ | — |
@@ -178,6 +179,16 @@ The detailed statement adds `"lines"`: `[ { "date", "kind": "service"|"product",
   "note": "Аванс", "cashOperationId": 31, "createdBy": { EmployeeRef }, "createdAt": "..." }
 ```
 `kind`: `bonus` (премия) | `penalty` (штраф) | `advance` (аванс) | `payout` (выплата); `amount` > 0.
+
+### Expense (расход студии)
+```json
+{ "id": 1, "name": "Аренда", "category": "rent", "amount": 60000, "repeat": "monthly", "date": "2026-10-01",
+  "endDate": null, "note": null, "createdBy": { EmployeeRef }, "createdAt": "...", "updatedAt": "..." }
+```
+Expenses outside the warehouse. `category`: `rent` (аренда) | `utilities` (свет, вода, коммуналка) | `internet` (связь)
+| `furniture` (мебель, оборудование) | `repair` (ремонт) | `marketing` (реклама) | `other`; `amount` > 0.
+`repeat`: `monthly` — charged every month on the day of `date` (on the last day of a shorter month) from `date` to
+`endDate` inclusive (`null` — still charged); `once` — a one-time purchase on `date`, no `endDate`.
 
 ### AuditEntry (журнал действий)
 ```json
@@ -814,6 +825,17 @@ The owner's list has every employee (inactive ones included) with a rules versio
 sales, attributed products or adjustments in the period, by name. `current` of the pay rules — the version in force
 today (`null` before the first one). Anyone else asking for another employee → `403` «Это доступно владельцу студии».
 
+### Expenses
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/expenses` | — | `{ items: [Expense] }` — monthly first, then one-time; newest first in each |
+| POST | `/expenses` | `{ name, category, amount, repeat, date, endDate?, note? }` | `Expense` · accepts `Idempotency-Key` |
+| PATCH | `/expenses/:id` | any of the POST fields | `Expense` · `repeat: "once"` drops `endDate` |
+| DELETE | `/expenses/:id` | — | `204` |
+
+Owner and administrator only. `400`: «У разового расхода нет даты окончания», «Дата окончания раньше даты начала».
+They show in the analytics (`expenses`, `totals.studioExpenses`).
+
 ### Audit log
 | Method | Path | Response |
 |---|---|---|
@@ -838,7 +860,7 @@ an appointment with its prepayment); `limit` default 50, max 200. Anyone but the
 - `summary` is written for people, in Russian, impersonal (the employee's gender is not stored; the app shows who
   next to it): «Запись №1846 (Анна Иванова) перенесена с … на …», «Продажа №1580 возвращена: 3 500 ₽»,
   «Цена «Мочка»: 1 600 → 1 800 ₽», «Фатиме назначена роль «Мастер»». Entities: `appointment`, `deposit`, `sale`, `receipt`, `cash`, `client`,
-  `service`, `product`, `stock`, `category`, `aftercare`, `knowledge`, `employee`, `schedule`, `payroll`,
+  `service`, `product`, `stock`, `category`, `aftercare`, `knowledge`, `employee`, `schedule`, `payroll`, `expense`,
   `settings`, `bot`, `campaign`, `certificate`, `waitlist`, `portfolio`. A manual bonus adjustment is `client.bonus_adjust` on the client
   («Начислено 500 бонусов клиенту «Анна Иванова»: Компенсация»); certificates log `certificate.update` /
   `certificate.cancel` / `certificate.send`; a sale paid with bonuses or certificates says so («… Оплачено бонусами
@@ -1508,7 +1530,7 @@ picture of `[from, to)` plus the headline numbers of the **previous period of th
   "previousFrom": "2026-10-09T21:00:00.000Z", "previousTo": "2026-10-12T21:00:00.000Z", "timezone": "Europe/Moscow",
   "totals": { "net": 10380, "gross": 11680, "refunds": 1300, "salesCount": 4, "averageCheck": 2920, "discounts": 420,
               "servicesRevenue": 2700, "productsRevenue": 8480, "cogs": 1900, "grossProfit": 2580, "marginPercent": 57.6,
-              "stockExpenses": 850, "newClients": 1, "appointmentsCompleted": 1, "noShows": 1, "noShowLoss": 5000,
+              "stockExpenses": 850, "studioExpenses": 60000, "newClients": 1, "appointmentsCompleted": 1, "noShows": 1, "noShowLoss": 5000,
               "depositsReceived": 1000 },
   "previous": { …same keys as totals },
   "revenue": { "gross": 11680, "refunds": 1300, "refundsCount": 2, "net": 10380, "salesCount": 4, "averageCheck": 2920,
@@ -1525,6 +1547,8 @@ picture of `[from, to)` plus the headline numbers of the **previous period of th
                 "byKind": [ { "kind": "jewelry", …same margin keys } ],
                 "top": [ { "productId": 1, "name": "Лабрет", "kind": "jewelry", …same margin keys,
                            "variants": [ { "variantId": 2, "name": "8 мм", …same margin keys } ] } ] },
+  "expenses": { "total": 60000, "monthly": 60000, "once": 0, "byCategory": [ { "category": "rent", "amount": 60000 } ],
+                "items": [ { "id": 1, "name": "Аренда", "category": "rent", "repeat": "monthly", "times": 1, "amount": 60000 } ] },
   "stock": { "writeoffs": { "quantity": 2, "value": 800, "unitsWithoutCost": 0 },
              "usage": { "quantity": 8, "value": 50, "unitsWithoutCost": 3 },
              "purchases": { "count": 1, "value": 3500 }, "expenses": 4350,
@@ -1560,7 +1584,7 @@ Which sales count where:
 Fields:
 - `totals` — headline numbers of the period; `previous` — the same keys for the previous period (the app shows
   deltas; a delta against `0` is shown as «—»). `servicesRevenue` / `productsRevenue` = `services.revenue` /
-  `products.revenue`; `cogs`, `grossProfit`, `marginPercent` as in `products`; `stockExpenses` = `stock.expenses`;
+  `products.revenue`; `cogs`, `grossProfit`, `marginPercent` as in `products`; `stockExpenses` = `stock.expenses`; `studioExpenses` = `expenses.total`;
   `newClients` as in `clients`; `appointmentsCompleted` / `noShows` / `noShowLoss` as in `appointments`;
   `depositsReceived` = `deposits.received`.
 - `revenue`: `gross` — Σ revenue of made sales, `salesCount` — their number, `averageCheck = round(gross / salesCount)`
@@ -1591,6 +1615,9 @@ Fields:
   end of the period: units in stock of every product (inactive ones included), their value at cost,
   `unitsWithoutCost`, and the same split `byKind`.
 - `deposits` — exactly the summary's prepayments block.
+- `expenses` — studio expenses (see «Expenses») charged on studio dates of the period: `total = monthly + once`,
+  `byCategory` (non-zero, largest first), `items` — each expense charged, largest first, `times` — how many times in the
+  period (a monthly one once per month), `amount = Expense.amount × times`.
 - `cash` — `cashIn` / `cashOut` / `operationsCount`: cash register operations of the period. Shifts **closed** in the
   period: `shiftsClosed`, `closingDifference` = Σ (`closingCash − expectedCash`), its negative part `shortage` (≤ 0)
   and positive part `surplus` (≥ 0); `openingDifference` = Σ (`openingCash` − `closingCash` of the shift before).

@@ -72,6 +72,11 @@ const RESTRICTED_ROUTES: ReadonlyMap<string, readonly Role[]> = new Map([
   ['GET /reports/summary', MANAGERS],
   ['GET /reports/analytics', MANAGERS],
   ['GET /reports/growth', MANAGERS],
+  // Studio expenses (rent, bills, one-time purchases) feed the analytics.
+  ['GET /expenses', MANAGERS],
+  ['POST /expenses', MANAGERS],
+  ['PATCH /expenses/:id', MANAGERS],
+  ['DELETE /expenses/:id', MANAGERS],
   // Settings, the knowledge base, staff chat binding and the bot test.
   ['PUT /settings/studio', MANAGERS],
   ['PUT /settings/retention', MANAGERS],
