@@ -127,6 +127,8 @@ const botBody = z.object({
   ),
   /** Older builds: a single reminder N hours before. */
   reminderHoursBefore: nonNull(z.number().int().min(1).max(LEGACY_REMINDER_HOURS_MAX)),
+  /** Omitted = unchanged (no app build sends it yet). */
+  widgetCards: nonNull(z.boolean()),
   /** Omitted = unchanged, `null` = that digest is off. */
   morningDigestAt: timeOfDay.nullish(),
   eveningDigestAt: timeOfDay.nullish(),

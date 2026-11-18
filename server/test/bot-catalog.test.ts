@@ -221,6 +221,6 @@ describe('bot: interactive catalogs', () => {
       expect(decodeCallback(data)).toEqual(action);
     }
     for (const bad of ['', 'jp:s1', 'jp:x1:0', 'sb:-1', 'rc:1:2', 'zz', 'jw:s1:0']) expect(decodeCallback(bad)).toBeNull();
-    expect(await press('jp:q', 1, true)).toEqual({ text: 'Эта кнопка устарела' });
+    expect(await press('jp:q', 1, true)).toEqual({ text: 'Эта кнопка устарела', error: true });
   });
 });

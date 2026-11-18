@@ -1,4 +1,4 @@
-import type { Bot, Context, Keyboard } from 'grammy';
+import type { Api, Bot, Context, Keyboard } from 'grammy';
 import type { AppContext } from '../context.js';
 import { errorMessage } from '../lib/errors.js';
 import { onSmmPrivate, onSmmVoice } from '../smm/tg-handlers.js';
@@ -11,6 +11,7 @@ import { BUTTONS, mainKeyboard, staffKeyboard } from './keyboards.js';
 import { handleContact, handleStaffCommand, handleStart, needsPhone, PHONE_REQUIRED } from './onboarding.js';
 import type { BotPipeline, IncomingFrom } from './pipeline.js';
 import type { PendingImage } from './prompt.js';
+import { callWidgetApi, widgetQueryOf, type WidgetQuery } from './widget-api.js';
 
 export { BUTTONS, mainKeyboard, STAFF_BUTTONS, staffKeyboard } from './keyboards.js';
 
@@ -87,12 +88,46 @@ async function openCatalog(deps: HandlerDeps, from: IncomingFrom, text: string, 
   await deps.pipeline.receiveHandled(from, text, () => sendMenu(deps.ctx, from.chatId, menu));
 }
 
+/**
+ * Answers a press in a widget within Telegram's 15 seconds. Only presses (`data`) in private chats are handled; the
+ * card redraws itself from the state the press changed, so only an error goes back (as «!text», shown under the
+ * buttons). A failed answer is only logged: the widget then shows its own «try again».
+ */
+export async function answerWidgetQuery(deps: HandlerDeps, api: Api, query: WidgetQuery): Promise<void> {
+  let data: string | undefined;
+  if (query.chatType === 'private' && query.type === 'data') {
+    const name = [query.from.firstName, query.from.lastName].filter(Boolean).join(' ').trim();
+    const answer = await handleCallback(
+      { ctx: deps.ctx, pipeline: deps.pipeline },
+      {
+        from: { chatId: query.chatId, telegramName: name || null, username: query.from.username },
+        data: query.data,
+        message: { messageId: query.messageId, isPhoto: false },
+        widget: true,
+      },
+    );
+    if (answer.error && answer.text) data = `!${answer.text}`;
+  }
+  try {
+    await callWidgetApi(api, 'answerWidgetQuery', { widget_query_id: query.id, ...(data ? { data } : {}) });
+  } catch (err) {
+    deps.ctx.log.warn({ chatId: query.chatId, err: errorMessage(err) }, 'widget query not answered');
+  }
+}
+
 export function registerHandlers(bot: Bot, deps: HandlerDeps): void {
   const { ctx, pipeline } = deps;
 
   // Works in any chat (group or private): binds the staff notification chat.
   bot.command('staff', async (c) => {
     await c.reply(handleStaffCommand(ctx, c.chat.id, String(c.match ?? '')));
+  });
+
+  // Presses in the appointment card (a widget, bot/widget-card.ts): handled like the reminder's inline buttons.
+  bot.use(async (c, next) => {
+    const query = widgetQueryOf(c.update);
+    if (!query) return next();
+    await answerWidgetQuery(deps, c.api, query);
   });
 
   const pm = bot.chatType('private');

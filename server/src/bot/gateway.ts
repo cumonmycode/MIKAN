@@ -38,6 +38,16 @@ export interface SentMessage {
   messageId: number;
 }
 
+/**
+ * An HTML widget message (Bot API 10.4, https://core.telegram.org/bots/widgets): fixed `html`, the per-message state
+ * `chatData` the widget draws from, and the `caption` apps without widget support show instead.
+ */
+export interface WidgetMessage {
+  html: string;
+  chatData: string;
+  caption: string;
+}
+
 /** A chat for the SMM methods: a private chat id, a channel's `@username` or its numeric `-100…` id. */
 export type ChatRef = number | string;
 
@@ -85,6 +95,10 @@ export interface BotGateway {
   editKeyboard(chatId: number, messageId: number, keyboard: InlineKeyboard | null): Promise<void>;
   deleteMessage(chatId: number, messageId: number): Promise<void>;
   sendTyping(chatId: number): Promise<void>;
+  /** Sends a widget that may send queries to the bot (private chats only in production). */
+  sendWidget(chatId: number, widget: WidgetMessage): Promise<SentMessage>;
+  /** Replaces the state of a widget message; the widget redraws from it. */
+  editWidgetData(chatId: number, messageId: number, chatData: string): Promise<void>;
 
   // SMM (server/src/smm/telegram.ts): channel posts, previews for approval, hand-offs.
 
@@ -173,6 +187,14 @@ export class OfflineGateway implements BotGateway {
 
   async sendTyping(): Promise<void> {
     /* nothing to do */
+  }
+
+  async sendWidget(): Promise<SentMessage> {
+    throw new BotUnavailableError();
+  }
+
+  async editWidgetData(): Promise<void> {
+    throw new BotUnavailableError();
   }
 
   async sendHtml(): Promise<SentMessage> {

@@ -17,6 +17,7 @@ import {
   type ReplyKeyboard,
   type SendOptions,
   type SentMessage,
+  type WidgetMessage,
 } from '../src/bot/gateway.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { silentLogger, type AiClient, type AppContext, type ImageGenerator } from '../src/context.js';
@@ -86,6 +87,22 @@ export class FakeGateway implements BotGateway {
   }
   async sendTyping(): Promise<void> {
     this.typing += 1;
+  }
+
+  /** Widget messages (the appointment cards) and the state edits of them. */
+  widgets: Array<{ chatId: number; widget: WidgetMessage; messageId: number }> = [];
+  widgetEdits: Array<{ chatId: number; messageId: number; chatData: string }> = [];
+  /** Errors to throw on the next sendWidget calls (consumed in order). */
+  widgetFailures: Error[] = [];
+  async sendWidget(chatId: number, widget: WidgetMessage): Promise<SentMessage> {
+    const failure = this.widgetFailures.shift();
+    if (failure) throw failure;
+    const messageId = ++this.nextMessageId;
+    this.widgets.push({ chatId, widget, messageId });
+    return { messageId };
+  }
+  async editWidgetData(chatId: number, messageId: number, chatData: string): Promise<void> {
+    this.widgetEdits.push({ chatId, messageId, chatData });
   }
   textsTo(chatId: number): string[] {
     return this.sent.filter((s) => s.chatId === chatId).map((s) => s.text);

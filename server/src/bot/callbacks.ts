@@ -1,12 +1,12 @@
 import { and, eq, gt } from 'drizzle-orm';
 import type { AppContext } from '../context.js';
-import { productVariants, services } from '../db/schema.js';
+import { appointments, productVariants, services } from '../db/schema.js';
 import { findClientByChat } from '../domain/clients.js';
 import { variantsByProduct } from '../domain/products.js';
-import { studioTimezone } from '../domain/settings.js';
+import { getStudioSettings, studioTimezone } from '../domain/settings.js';
 import { errorMessage } from '../lib/errors.js';
 import { sizedName } from '../lib/jewelry.js';
-import type { ProductRow, VariantRow } from '../lib/serialize.js';
+import type { AppointmentRow, ProductRow, VariantRow } from '../lib/serialize.js';
 import { formatRub, formatServicePrice } from '../lib/text.js';
 import { formatHumanDateTime } from '../lib/time.js';
 import { isSmmCallback, onSmmCallback } from '../smm/tg-handlers.js';
@@ -29,6 +29,7 @@ import { followUpButton } from './follow-ups.js';
 import type { InlineKeyboard } from './gateway.js';
 import { marketingButton } from './marketing.js';
 import type { BotPipeline, IncomingFrom } from './pipeline.js';
+import { reminderCardData, type CardState } from './widget-card.js';
 
 /**
  * Inline buttons: catalog paging and choices, the reminder buttons, the follow-up buttons (bot/follow-ups.ts), the
@@ -47,11 +48,15 @@ export interface CallbackQueryInput {
   data: string;
   /** The message the button belongs to; null when Telegram did not send it (too old). */
   message: CurrentMessage | null;
+  /** The press came from the appointment card (a widget, bot/widget-card.ts), not from an inline button. */
+  widget?: boolean;
 }
 
-/** The toast shown to the user after a press (Telegram `answerCallbackQuery`). */
+/** The toast shown to the user after a press (Telegram `answerCallbackQuery`; the card shows only errors). */
 export interface CallbackAnswer {
   text?: string;
+  /** The press did nothing: the card shows `text` under its buttons. */
+  error?: boolean;
 }
 
 export const REMINDER_BUTTONS = { confirm: '✅ Приду', move: '🔁 Перенести' } as const;
@@ -79,12 +84,12 @@ export async function handleCallback(deps: CallbackDeps, query: CallbackQueryInp
     return onSmmCallback(deps.ctx, { chatId: query.from.chatId, data: query.data, messageId: query.message?.messageId ?? null });
   }
   const action = decodeCallback(query.data);
-  if (!action) return { text: 'Эта кнопка устарела' };
+  if (!action) return { text: 'Эта кнопка устарела', error: true };
   try {
     return await dispatch(deps, query, action);
   } catch (err) {
     deps.ctx.log.warn({ chatId: query.from.chatId, data: query.data, err: errorMessage(err) }, 'bot button failed');
-    return { text: 'Не получилось — попробуйте ещё раз' };
+    return { text: 'Не получилось — попробуйте ещё раз', error: true };
   }
 }
 
@@ -211,6 +216,20 @@ async function pickSize(deps: CallbackDeps, query: CallbackQueryInput, list: Jew
   return { text: 'Отлично! Передаю ваш выбор 🙌' };
 }
 
+/**
+ * Rewrites the appointment card the press came from. The card's original title is not sent back with a press, so the
+ * redrawn card names the studio. A failure is only logged: the press itself is done and answered.
+ */
+async function redrawCard(ctx: AppContext, query: CallbackQueryInput, appointment: AppointmentRow, state: CardState): Promise<void> {
+  if (!query.message) return;
+  const title = `🗓 Запись в ${getStudioSettings(ctx.db).name}`;
+  try {
+    await ctx.gateway.editWidgetData(query.from.chatId, query.message.messageId, reminderCardData(ctx.db, appointment, title, state));
+  } catch (err) {
+    ctx.log.warn({ chatId: query.from.chatId, appointmentId: appointment.id, err: errorMessage(err) }, 'appointment card not redrawn');
+  }
+}
+
 async function reminderButton(
   deps: CallbackDeps,
   query: CallbackQueryInput,
@@ -223,12 +242,19 @@ async function reminderButton(
   const client = findClientByChat(ctx.db, chatId);
   const own = client ? ownActiveAppointment(ctx.db, client.id, appointmentId) : null;
   if (!client || !own?.ok) {
-    if (query.message) await ctx.gateway.editKeyboard(chatId, query.message.messageId, null).catch(() => undefined);
-    return { text: 'Эта запись уже неактуальна' };
+    if (query.widget) {
+      // Only the client's own appointment is drawn (its details stay out of a chat it does not belong to).
+      const row = client ? ctx.db.select().from(appointments).where(eq(appointments.id, appointmentId)).get() : undefined;
+      if (row && row.clientId === client?.id) await redrawCard(ctx, query, row, 'x');
+    } else if (query.message) {
+      await ctx.gateway.editKeyboard(chatId, query.message.messageId, null).catch(() => undefined);
+    }
+    return { text: 'Эта запись уже неактуальна', error: true };
   }
   const tz = studioTimezone(ctx.db);
   const when = formatHumanDateTime(own.appointment.startsAt, tz);
   if (kind === 'reminderMove') {
+    if (query.widget) await redrawCard(ctx, query, own.appointment, 'm');
     pipeline.receive(
       query.from,
       `[Кнопка] 🔁 Хочу перенести запись №${appointmentId}: ${when} — ${appointmentWhat(ctx.db, [own.appointment]).get(appointmentId)}`,
@@ -236,8 +262,10 @@ async function reminderButton(
     return { text: 'Подберём другое время 🙌' };
   }
   const result = await confirmForClient(ctx, client.id, appointmentId);
-  if (!result.ok) return { text: 'Эта запись уже неактуальна' };
-  if (query.message) {
+  if (!result.ok) return { text: 'Эта запись уже неактуальна', error: true };
+  if (query.widget) {
+    await redrawCard(ctx, query, result.appointment, 'c');
+  } else if (query.message) {
     const moveOnly = reminderKeyboard(appointmentId).map((row) => row.filter((b) => b.text === REMINDER_BUTTONS.move));
     await ctx.gateway.editKeyboard(chatId, query.message.messageId, moveOnly).catch(() => undefined);
   }

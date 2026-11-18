@@ -90,6 +90,11 @@ export interface BotSettingsStored {
   remindersEnabled: boolean;
   /** Minutes before the appointment start at which reminders are sent, distinct, latest-first (largest first). */
   reminderOffsets: number[];
+  /**
+   * Reminders go as a live appointment card (a Telegram widget, bot/widget-card.ts) instead of a text with buttons.
+   * Off by default: a pilot of Bot API 10.4; apps without widget support show the card's caption.
+   */
+  widgetCards: boolean;
   /** Staff digests: "HH:MM" studio time, `null` = off (see bot/digest.ts). */
   morningDigestAt: string | null;
   eveningDigestAt: string | null;
@@ -150,6 +155,7 @@ export const DEFAULT_BOT: BotSettingsStored = {
   aftercareHour: 12,
   remindersEnabled: true,
   reminderOffsets: [24 * 60],
+  widgetCards: false,
   morningDigestAt: '09:30',
   eveningDigestAt: '21:30',
 };

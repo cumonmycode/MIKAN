@@ -713,12 +713,18 @@ carry the inline buttons «✅ Приду» and «🔁 Перенести» (see
 ```json
 { "enabled": true, "aiEnabled": true, "greeting": "...", "extraInstructions": "",
   "aftercareHour": 12, "remindersEnabled": true, "reminderOffsets": [1440, 120], "reminderHoursBefore": 24,
-  "morningDigestAt": "09:30", "eveningDigestAt": "21:30",
+  "widgetCards": false, "morningDigestAt": "09:30", "eveningDigestAt": "21:30",
   "botUsername": "mikan_studio_bot", "staffChatBound": false, "aiConfigured": true }
 ```
 - `morningDigestAt` / `eveningDigestAt` — when the bot sends the morning summary («что на сегодня») and the evening
   summary («итоги дня») to every staff chat, `"HH:MM"` in the studio timezone; `null` = that summary is off. Defaults
   `"09:30"` and `"21:30"`. On PUT: omitted = unchanged, `null` = off (older builds never send them). See «Staff digests».
+- `widgetCards` — pilot of Telegram widgets (Bot API 10.4): reminders and reschedule notices go as a live
+  appointment card in the message (when / what / master, «✅ Приду» / «🔁 Перенести» inside the card) instead of a text
+  with inline buttons. A press confirms or starts moving the visit like the inline buttons, and the card redraws in
+  place (confirmed / moving / no longer actual). The reminder text is the card's caption, which apps without widget
+  support show instead. If Telegram refuses the widget (other than a blocked chat or a flood limit), the plain
+  reminder goes. Default `false`; omitted on PUT = unchanged.
 - `botUsername`, `staffChatBound`, `aiConfigured` are read-only (ignored on PUT).
 - `reminderOffsets` — when the bot reminds clients of an appointment: minutes before its start, e.g. `[1440, 120]` =
   «за 1 день» and «за 2 часа». 1–6 distinct integers, each 15…20160 (15 minutes … 14 days); the server returns them
