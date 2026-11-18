@@ -97,6 +97,11 @@ nonisolated enum ScheduleShading {
         )
     }
 
+    /// The masters (of the shown ones) who work that day, by their own schedule or the studio hours.
+    static func workingMasters(days: [ScheduleDay], masterId: Int?) -> [ScheduleDay] {
+        days.filter { (masterId == nil || $0.employeeId == masterId) && !workingMinutes($0).isEmpty }
+    }
+
     /// The masters (of the shown ones) who do not work that day by their own schedule.
     static func offMasters(days: [ScheduleDay], masterId: Int?) -> [ScheduleDay] {
         days.filter { (masterId == nil || $0.employeeId == masterId) && $0.isOwn && !$0.working }

@@ -235,6 +235,17 @@ struct WorkScheduleTests {
         #expect(ScheduleShading.offMasters(days: days, masterId: 4).isEmpty)
     }
 
+    @Test("Working masters are those with working time that day, by any schedule")
+    func workingMasters() {
+        let days = [
+            Self.scheduleDay(3, working: false, note: "Отпуск"),
+            Self.scheduleDay(4),
+            Self.scheduleDay(5, source: .studio),
+        ]
+        #expect(ScheduleShading.workingMasters(days: days, masterId: nil).map(\.employeeId) == [4, 5])
+        #expect(ScheduleShading.workingMasters(days: days, masterId: 3).isEmpty)
+    }
+
     @Test("The editor hint tells whether an appointment fits the master's day")
     func hint() {
         let day = Self.scheduleDay(3, breaks: [Self.pause])

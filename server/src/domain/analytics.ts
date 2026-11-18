@@ -13,8 +13,10 @@ import {
   type AppointmentsSection,
 } from './analytics-people.js';
 import { loadPeriodSales, revenueSection, timeSeries, type PeriodSales, type RevenueSection } from './analytics-sales.js';
+import { expensesInPeriod, type ExpensesSection } from './expenses.js';
 import { reportDeposits, type ReportDeposits } from './reports.js';
 import { studioTimezone } from './settings.js';
+import { localDate } from '../lib/time.js';
 
 /**
  * `GET /reports/analytics`: the financial picture of a period and the KPIs of the previous period of the same
@@ -30,10 +32,12 @@ interface PeriodCore {
   appointments: AppointmentsSection;
   stock: StockExpenses;
   deposits: ReportDeposits;
+  expenses: ExpensesSection;
   newClients: number;
 }
 
 function periodCore(db: DbOrTx, from: number, to: number): PeriodCore {
+  const tz = studioTimezone(db);
   const sales = loadPeriodSales(db, from, to);
   const groups = appointmentGroups(db, from, to);
   return {
@@ -44,6 +48,8 @@ function periodCore(db: DbOrTx, from: number, to: number): PeriodCore {
     appointments: appointmentsSection(groups),
     stock: stockExpenses(db, from, to),
     deposits: reportDeposits(db, from, to),
+    // Studio dates of `[from, to)`: the last one is the day of the last millisecond.
+    expenses: expensesInPeriod(db, localDate(from, tz), localDate(to - 1, tz)),
     newClients: newClientsCount(db, from, to),
   };
 }
@@ -64,6 +70,7 @@ function totalsOf(core: PeriodCore) {
     grossProfit: items.products.grossProfit,
     marginPercent: items.products.marginPercent,
     stockExpenses: stock.expenses,
+    studioExpenses: core.expenses.total,
     newClients: core.newClients,
     appointmentsCompleted: appointments.completed,
     noShows: appointments.noShow,
@@ -91,6 +98,7 @@ export function reportAnalytics(db: DbOrTx, from: number, to: number) {
     products: current.items.products,
     stock: { ...current.stock, onHand: stockOnHand(db) },
     deposits: current.deposits,
+    expenses: current.expenses,
     cash: cashSection(db, from, to),
     masters: mastersSection(db, current.sales, current.groups),
     clients: clientsSection(db, current.sales, from, to, current.newClients),

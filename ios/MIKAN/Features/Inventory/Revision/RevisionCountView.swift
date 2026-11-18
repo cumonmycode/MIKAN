@@ -98,7 +98,8 @@ struct RevisionCountView: View {
         }
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
-        .searchable(text: $search, prompt: "Название, размер")
+        // Always shown: an auto-hiding drawer above the pinned filter made the list jump at the top.
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Название, размер")
         .safeAreaBar(edge: .top) {
             Picker("Показать", selection: $lineFilter.animation(.snappy)) {
                 ForEach(RevisionLineFilter.allCases) { filter in

@@ -13,6 +13,8 @@ final class AppLock {
     private(set) var isEnabled: Bool
     private(set) var method: DeviceAuthentication.Method
     private(set) var isAuthenticating = false
+    /// A call keeps the scene inactive with the app on screen.
+    @ObservationIgnored let callWatch = CallWatch()
     /// Each lock asks once by itself; after a cancel the button asks again.
     @ObservationIgnored private var promptsAutomatically = true
     @ObservationIgnored private let defaults: UserDefaults
@@ -36,12 +38,13 @@ final class AppLock {
         if !enabled { rule.unlock() }
     }
 
-    /// Blurs on leaving the app; locks or reveals it on return.
-    func scenePhaseChanged(to phase: ScenePhase, signedIn: Bool) {
+    /// Blurs on leaving the app; locks or reveals it on return. `staysOnScreen`: on a call or while the screen is shared,
+    /// being inactive doesn't mean leaving.
+    func scenePhaseChanged(to phase: ScenePhase, signedIn: Bool, staysOnScreen: Bool) {
         let wasLocked = rule.isLocked
         switch phase {
         case .inactive:
-            rule.resignActive(applies: applies(signedIn: signedIn))
+            rule.becomeInactive(at: .now, applies: applies(signedIn: signedIn), staysOnScreen: staysOnScreen)
         case .background:
             rule.enterBackground(at: .now, applies: applies(signedIn: signedIn))
         case .active:

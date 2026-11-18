@@ -99,7 +99,8 @@ struct WorkTimeShading: View {
     }
 }
 
-/// Under the day headers: who does not work that day by their own schedule. Hidden when nobody is off.
+/// Under the day headers. For «Все мастера»: who works that day («Работают: Фатима, Борис»), or «Никто не работает».
+/// For one master: only their day off («Выходной», «Отпуск»). Hidden while the schedules are not loaded.
 struct MastersOffRow: View {
     @Environment(WorkScheduleStore.self) private var store
     @Environment(ReferenceStore.self) private var reference
@@ -108,13 +109,19 @@ struct MastersOffRow: View {
     let masterId: Int?
     let scale: CalendarScale
 
+    private enum Cell {
+        case empty
+        case working([ScheduleDay])
+        case off(ScheduleDay)
+    }
+
     var body: some View {
-        let off = days.map { ScheduleShading.offMasters(days: store.days(on: CalendarDay.string(from: $0)), masterId: masterId) }
-        if off.contains(where: { !$0.isEmpty }) {
+        let cells = days.map { cell(for: store.days(on: CalendarDay.string(from: $0))) }
+        if cells.contains(where: { if case .empty = $0 { false } else { true } }) {
             HStack(spacing: 0) {
                 Color.clear.frame(width: TimeGridContent.gutterWidth, height: 1)
-                ForEach(Array(off.enumerated()), id: \.offset) { _, masters in
-                    cell(masters)
+                ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                    view(cell)
                         .frame(maxWidth: .infinity)
                 }
                 Color.clear.frame(width: 4, height: 1)
@@ -124,27 +131,46 @@ struct MastersOffRow: View {
         }
     }
 
+    private func cell(for day: [ScheduleDay]) -> Cell {
+        if let masterId {
+            return ScheduleShading.offMasters(days: day, masterId: masterId).first.map(Cell.off) ?? .empty
+        }
+        guard !day.isEmpty else { return .empty }
+        return .working(sorted(ScheduleShading.workingMasters(days: day, masterId: nil)))
+    }
+
+    /// In the order of the employees list, as everywhere else in the app.
+    private func sorted(_ masters: [ScheduleDay]) -> [ScheduleDay] {
+        let order = Dictionary(reference.employees.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return masters.sorted { (order[$0.employeeId] ?? .max) < (order[$1.employeeId] ?? .max) }
+    }
+
     private func name(_ id: Int) -> String {
         reference.employees.first { $0.id == id }?.name ?? "Мастер"
     }
 
-    /// «Не работает: Фатима (отпуск)», «Не работают: Фатима, Борис».
+    /// «Работает: Фатима», «Работают: Фатима, Борис», «Никто не работает».
     private func label(_ masters: [ScheduleDay]) -> String {
-        let names = masters.map { day in name(day.employeeId) + (day.note.map { " (\($0.lowercased()))" } ?? "") }
-        return "\(masters.count == 1 ? "Не работает" : "Не работают"): \(names.joined(separator: ", "))"
+        guard !masters.isEmpty else { return "Никто не работает" }
+        let names = masters.map { name($0.employeeId) }
+        return "\(masters.count == 1 ? "Работает" : "Работают"): \(names.joined(separator: ", "))"
     }
 
     @ViewBuilder
-    private func cell(_ masters: [ScheduleDay]) -> some View {
-        if masters.isEmpty {
+    private func view(_ cell: Cell) -> some View {
+        switch cell {
+        case .empty:
             Color.clear.frame(height: 1)
-        } else if scale == .week {
+        case .off(let day):
+            caption(day.note ?? "Выходной")
+        case .working(let masters) where scale == .week:
             HStack(spacing: 2) {
-                Image(systemName: "moon.zzz.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                if masterId == nil {
-                    ForEach(masters.prefix(3), id: \.employeeId) { day in
+                if masters.isEmpty {
+                    Image(systemName: "moon.zzz.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(masters.prefix(4), id: \.employeeId) { day in
                         Circle()
                             .fill(Color.master(reference.employees.first { $0.id == day.employeeId }?.color))
                             .frame(width: 6, height: 6)
@@ -153,14 +179,17 @@ struct MastersOffRow: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(label(masters))
-        } else {
-            Text(masterId == nil ? label(masters) : (masters[0].note ?? "Выходной"))
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .padding(.horizontal, 4)
-                .accessibilityLabel(label(masters))
+        case .working(let masters):
+            caption(label(masters))
         }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .padding(.horizontal, 4)
     }
 }

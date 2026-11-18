@@ -81,6 +81,8 @@ struct BookingRequestsView: View {
         }
         .remoteErrorAlert(requests)
         .navigationTitle("Заявки")
+        // Inline: a collapsing large title above the pinned status picker made the list shake.
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func load() async {
