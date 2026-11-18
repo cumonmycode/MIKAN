@@ -60,6 +60,7 @@ const PATH_ENTITIES: Record<string, string> = {
   employees: 'employee',
   schedules: 'schedule',
   payroll: 'payroll',
+  expenses: 'expense',
   settings: 'settings',
   knowledge: 'knowledge',
   bot: 'bot',

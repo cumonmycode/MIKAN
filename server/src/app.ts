@@ -33,6 +33,7 @@ import { depositRoutes } from './routes/deposits.js';
 import { deviceRoutes } from './routes/devices.js';
 import { employeeRoutes } from './routes/employees.js';
 import { historyRoutes } from './routes/history.js';
+import { expenseRoutes } from './routes/expenses.js';
 import { payrollRoutes } from './routes/payroll.js';
 import { portfolioRoutes } from './routes/portfolio.js';
 import { productRoutes } from './routes/products.js';
@@ -224,6 +225,7 @@ export async function buildApp(ctx: AppContext, options: BuildOptions = {}): Pro
         campaignRoutes(secured, ctx);
         auditRoutes(secured, ctx);
         payrollRoutes(secured, ctx);
+        expenseRoutes(secured, ctx);
         deviceRoutes(secured, ctx);
         waitlistRoutes(secured, ctx);
         portfolioRoutes(secured, ctx);

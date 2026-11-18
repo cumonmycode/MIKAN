@@ -68,6 +68,11 @@ struct MoreView: View {
                         Label("Сотрудники", systemImage: "person.3")
                     }
                     MastersPortfolioLink()
+                    if permissions.seesReports {
+                        NavigationLink { ExpensesView() } label: {
+                            Label("Расходы студии", systemImage: "creditcard")
+                        }
+                    }
                     NavigationLink { PayrollView() } label: {
                         Label("Зарплата", systemImage: "banknote")
                     }

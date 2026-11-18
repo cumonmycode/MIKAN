@@ -72,6 +72,8 @@ struct ScheduledMessagesView: View {
             Text("Сообщение для \(message.client?.fullName ?? "клиента") не будет отправлено.")
         }
         .navigationTitle("Запланированные")
+        // Inline: a collapsing large title above the pinned status picker made the list shake.
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var cancelBinding: Binding<Bool> {

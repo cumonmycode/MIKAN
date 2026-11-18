@@ -43,6 +43,7 @@ struct AnalyticsContent: View {
             AnalyticsMarginCard(products: analytics.products)
         }
         AnalyticsStockCard(stock: analytics.stock)
+        AnalyticsExpensesCard(expenses: analytics.expenses, previousTotal: analytics.previous.studioExpenses)
         if analytics.cash.operationsCount > 0 || analytics.cash.shiftsClosed > 0 {
             AnalyticsCashCard(cash: analytics.cash)
         }

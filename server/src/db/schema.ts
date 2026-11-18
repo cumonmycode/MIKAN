@@ -1085,3 +1085,29 @@ export const clientAccessTokens = sqliteTable(
   (t) => [index('client_access_tokens_client_idx').on(t.clientId)],
 );
 export * from './schema-smm.js';
+
+/**
+ * Studio expenses outside the warehouse (docs/API.md «Expenses»): rent, electricity and the like every month,
+ * or a one-time purchase such as a wardrobe.
+ */
+export const studioExpenses = sqliteTable(
+  'studio_expenses',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    /** `rent` | `utilities` | `internet` | `furniture` | `repair` | `marketing` | `other`. */
+    category: text('category').notNull(),
+    amount: integer('amount').notNull(),
+    /** `monthly` — charged every month on the day of `date`; `once` — on `date` only. */
+    repeat: text('repeat').notNull(),
+    /** Studio-local "YYYY-MM-DD": the purchase date, or the first month of a monthly expense. */
+    date: text('date').notNull(),
+    /** Studio-local "YYYY-MM-DD", inclusive: the last date a monthly expense is charged; NULL — still charged. */
+    endDate: text('end_date'),
+    note: text('note'),
+    createdBy: integer('created_by').references(() => employees.id),
+    createdAt: ms('created_at').notNull(),
+    updatedAt: ms('updated_at').notNull(),
+  },
+  (t) => [index('studio_expenses_date_idx').on(t.date)],
+);

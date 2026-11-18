@@ -162,6 +162,13 @@
       "when": 1793698958840,
       "tag": "0023_bot_message_photo",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795032035257,
+      "tag": "0024_studio_expenses",
+      "breakpoints": true
     }
   ]
 }
