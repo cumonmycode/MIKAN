@@ -66,6 +66,7 @@ nonisolated enum AnalyticsCSV {
             line("Валовая прибыль с товаров, ₽", t.grossProfit, p.grossProfit),
             ["Маржа, %", percent(t.marginPercent), percent(p.marginPercent), AnalyticsDelta.points(t.marginPercent, previous: p.marginPercent).text],
             line("Расходы склада, ₽", t.stockExpenses, p.stockExpenses),
+            line("Расходы студии, ₽", t.studioExpenses, p.studioExpenses),
             line("Новые клиенты", t.newClients, p.newClients),
             line("Завершённые записи", t.appointmentsCompleted, p.appointmentsCompleted),
             line("Неявки", t.noShows, p.noShows),

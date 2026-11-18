@@ -22,6 +22,8 @@ nonisolated struct ReportAnalytics: Decodable, Sendable {
     var products = AnalyticsProducts()
     var stock = AnalyticsStock()
     var deposits = ReportDeposits.zero
+    /// Rent, bills and one-time purchases charged in the period; empty from a server without them.
+    var expenses = AnalyticsExpenses()
     var cash = AnalyticsCash()
     var masters: [AnalyticsMaster] = []
     var clients = AnalyticsClients()
@@ -36,14 +38,14 @@ nonisolated struct ReportAnalytics: Decodable, Sendable {
             && stock.expenses == 0 && stock.writeoffs.quantity == 0 && stock.usage.quantity == 0
             && stock.purchases.count == 0 && cash.operationsCount == 0 && cash.shiftsClosed == 0
             && deposits.received == 0 && deposits.applied == 0 && deposits.refunded == 0 && deposits.retained == 0
-            && !loyalty.hasActivity
+            && !loyalty.hasActivity && expenses.total == 0
     }
 }
 
 nonisolated extension ReportAnalytics {
     private enum CodingKeys: String, CodingKey {
         case from, to, previousFrom, previousTo, timezone, totals, previous, revenue, byDay, byWeekday, byHour
-        case services, products, stock, deposits, cash, masters, clients, appointments, loyalty
+        case services, products, stock, deposits, expenses, cash, masters, clients, appointments, loyalty
     }
 
     /// Sections a server does not send decode as empty, so the screen still shows the rest.
@@ -65,6 +67,7 @@ nonisolated extension ReportAnalytics {
         products = try c.decode(.products, or: AnalyticsProducts())
         stock = try c.decode(.stock, or: AnalyticsStock())
         deposits = try c.decode(.deposits, or: .zero)
+        expenses = try c.decode(.expenses, or: AnalyticsExpenses())
         cash = try c.decode(.cash, or: AnalyticsCash())
         masters = try c.decode(.masters, or: [])
         clients = try c.decode(.clients, or: AnalyticsClients())
@@ -89,6 +92,8 @@ nonisolated struct AnalyticsTotals: Hashable, Sendable {
     /// `nil` when no product with a known cost sold.
     var marginPercent: Double?
     var stockExpenses = 0
+    /// Rent, bills and one-time purchases (`expenses.total`).
+    var studioExpenses = 0
     var newClients = 0
     var appointmentsCompleted = 0
     var noShows = 0
@@ -101,7 +106,7 @@ nonisolated struct AnalyticsTotals: Hashable, Sendable {
 nonisolated extension AnalyticsTotals: Decodable {
     private enum CodingKeys: String, CodingKey {
         case net, gross, refunds, salesCount, averageCheck, discounts, servicesRevenue, productsRevenue, cogs
-        case grossProfit, marginPercent, stockExpenses, newClients, appointmentsCompleted, noShows, noShowLoss
+        case grossProfit, marginPercent, stockExpenses, studioExpenses, newClients, appointmentsCompleted, noShows, noShowLoss
         case depositsReceived
     }
 
@@ -120,6 +125,7 @@ nonisolated extension AnalyticsTotals: Decodable {
         grossProfit = try c.decode(.grossProfit, or: 0)
         marginPercent = try c.decodeIfPresent(Double.self, forKey: .marginPercent)
         stockExpenses = try c.decode(.stockExpenses, or: 0)
+        studioExpenses = try c.decode(.studioExpenses, or: 0)
         newClients = try c.decode(.newClients, or: 0)
         appointmentsCompleted = try c.decode(.appointmentsCompleted, or: 0)
         noShows = try c.decode(.noShows, or: 0)
