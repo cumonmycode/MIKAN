@@ -3,7 +3,7 @@ import type { AppContext } from '../context.js';
 import { appointments, productVariants, services } from '../db/schema.js';
 import { findClientByChat } from '../domain/clients.js';
 import { variantsByProduct } from '../domain/products.js';
-import { getStudioSettings, studioTimezone } from '../domain/settings.js';
+import { studioTimezone } from '../domain/settings.js';
 import { errorMessage } from '../lib/errors.js';
 import { sizedName } from '../lib/jewelry.js';
 import type { AppointmentRow, ProductRow, VariantRow } from '../lib/serialize.js';
@@ -29,7 +29,7 @@ import { followUpButton } from './follow-ups.js';
 import type { InlineKeyboard } from './gateway.js';
 import { marketingButton } from './marketing.js';
 import type { BotPipeline, IncomingFrom } from './pipeline.js';
-import { reminderCardData, type CardState } from './widget-card.js';
+import { redrawPressedCard } from './widget-cards.js';
 
 /**
  * Inline buttons: catalog paging and choices, the reminder buttons, the follow-up buttons (bot/follow-ups.ts), the
@@ -216,18 +216,10 @@ async function pickSize(deps: CallbackDeps, query: CallbackQueryInput, list: Jew
   return { text: 'Отлично! Передаю ваш выбор 🙌' };
 }
 
-/**
- * Rewrites the appointment card the press came from. The card's original title is not sent back with a press, so the
- * redrawn card names the studio. A failure is only logged: the press itself is done and answered.
- */
-async function redrawCard(ctx: AppContext, query: CallbackQueryInput, appointment: AppointmentRow, state: CardState): Promise<void> {
+/** Redraws the card a press came from; `pressed` «m» right after «Перенести». */
+async function redrawCard(ctx: AppContext, query: CallbackQueryInput, appointment: AppointmentRow, pressed: 'm' | null): Promise<void> {
   if (!query.message) return;
-  const title = `🗓 Запись в ${getStudioSettings(ctx.db).name}`;
-  try {
-    await ctx.gateway.editWidgetData(query.from.chatId, query.message.messageId, reminderCardData(ctx.db, appointment, title, state));
-  } catch (err) {
-    ctx.log.warn({ chatId: query.from.chatId, appointmentId: appointment.id, err: errorMessage(err) }, 'appointment card not redrawn');
-  }
+  await redrawPressedCard(ctx, query.from.chatId, query.message.messageId, appointment, pressed);
 }
 
 async function reminderButton(
@@ -245,7 +237,7 @@ async function reminderButton(
     if (query.widget) {
       // Only the client's own appointment is drawn (its details stay out of a chat it does not belong to).
       const row = client ? ctx.db.select().from(appointments).where(eq(appointments.id, appointmentId)).get() : undefined;
-      if (row && row.clientId === client?.id) await redrawCard(ctx, query, row, 'x');
+      if (row && row.clientId === client?.id) await redrawCard(ctx, query, row, null);
     } else if (query.message) {
       await ctx.gateway.editKeyboard(chatId, query.message.messageId, null).catch(() => undefined);
     }
@@ -264,7 +256,7 @@ async function reminderButton(
   const result = await confirmForClient(ctx, client.id, appointmentId);
   if (!result.ok) return { text: 'Эта запись уже неактуальна', error: true };
   if (query.widget) {
-    await redrawCard(ctx, query, result.appointment, 'c');
+    await redrawCard(ctx, query, result.appointment, null);
   } else if (query.message) {
     const moveOnly = reminderKeyboard(appointmentId).map((row) => row.filter((b) => b.text === REMINDER_BUTTONS.move));
     await ctx.gateway.editKeyboard(chatId, query.message.messageId, moveOnly).catch(() => undefined);

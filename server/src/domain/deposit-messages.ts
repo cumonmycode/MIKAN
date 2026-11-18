@@ -1,5 +1,6 @@
 import { BotSendError, BotUnavailableError } from '../bot/gateway.js';
 import { notifyStaff } from '../bot/staff.js';
+import { defaultCardTitle, sendAppointmentCard } from '../bot/widget-cards.js';
 import type { AppContext } from '../context.js';
 import type { DbOrTx } from '../db/client.js';
 import { badRequest, conflict, errorMessage } from '../lib/errors.js';
@@ -80,10 +81,14 @@ export function requireDepositChat(ctx: AppContext, appointment: AppointmentRow,
 
 /**
  * Sends to the client's chat and keeps a copy in the conversation the staff see; an anonymous chat becomes the
- * client's (a chat attributed to someone else keeps its owner). Throws the gateway's errors.
+ * client's (a chat attributed to someone else keeps its owner). With `card`, the text goes as the caption of that
+ * appointment's live card while «widgetCards» is on (bot/widget-cards.ts). Throws the gateway's errors.
  */
-export async function sendToClientChat(ctx: AppContext, chatId: number, clientId: number, text: string): Promise<void> {
-  await ctx.gateway.sendText(chatId, text);
+export async function sendToClientChat(ctx: AppContext, chatId: number, clientId: number, text: string, card?: AppointmentRow): Promise<void> {
+  const sent = card
+    ? await sendAppointmentCard(ctx, { chatId, appointment: card, kind: 'booking', title: defaultCardTitle(ctx), caption: text })
+    : null;
+  if (!sent) await ctx.gateway.sendText(chatId, text);
   const owner = findChat(ctx.db, chatId)?.clientId ?? null;
   upsertChat(ctx.db, chatId, owner == null ? { clientId } : {});
   storeMessage(ctx.db, chatId, 'system', text);

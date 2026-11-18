@@ -7,6 +7,7 @@ import { CAMPAIGN_TICK_MS, runCampaigns } from './bot/campaign-sender.js';
 import { BotController } from './bot/index.js';
 import { RETENTION_CHECK_INTERVAL_MS, sendDueRetention } from './bot/retention.js';
 import { processDueMessages, SENDER_INTERVAL_MS } from './bot/sender.js';
+import { refreshWidgetCards } from './bot/widget-cards.js';
 import { loadConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { openDatabase } from './db/client.js';
@@ -82,6 +83,9 @@ async function main(): Promise<void> {
     sending = true;
     processDueMessages(ctx)
       .catch((err) => log.error({ err: errorMessage(err) }, 'scheduled sender failed'))
+      // The appointment cards in client chats follow their appointments (bot/widget-cards.ts).
+      .then(() => refreshWidgetCards(ctx))
+      .catch((err) => log.error({ err: errorMessage(err) }, 'appointment cards refresh failed'))
       .finally(() => {
         sending = false;
       });

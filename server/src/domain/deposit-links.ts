@@ -63,7 +63,7 @@ async function deliver(
   kind: DepositLinkText,
 ): Promise<{ payment: QrPaymentRow; sendError: string | null }> {
   try {
-    await sendToClientChat(ctx, chatId, appointment.clientId, depositLinkText(ctx.db, appointment, code, kind));
+    await sendToClientChat(ctx, chatId, appointment.clientId, depositLinkText(ctx.db, appointment, code, kind), appointment);
   } catch (err) {
     ctx.log.warn({ err: errorMessage(err), qrPaymentId: code.id, chatId }, 'prepayment link not delivered');
     return { payment: code, sendError: deliveryProblem(err) };

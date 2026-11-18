@@ -730,12 +730,17 @@ carry the inline buttons «✅ Приду» and «🔁 Перенести» (see
 - `morningDigestAt` / `eveningDigestAt` — when the bot sends the morning summary («что на сегодня») and the evening
   summary («итоги дня») to every staff chat, `"HH:MM"` in the studio timezone; `null` = that summary is off. Defaults
   `"09:30"` and `"21:30"`. On PUT: omitted = unchanged, `null` = off (older builds never send them). See «Staff digests».
-- `widgetCards` — pilot of Telegram widgets (Bot API 10.4): reminders and reschedule notices go as a live
-  appointment card in the message (when / what / master, «✅ Приду» / «🔁 Перенести» inside the card) instead of a text
-  with inline buttons. A press confirms or starts moving the visit like the inline buttons, and the card redraws in
-  place (confirmed / moving / no longer actual). The reminder text is the card's caption, which apps without widget
-  support show instead. If Telegram refuses the widget (other than a blocked chat or a flood limit), the plain
-  reminder goes. Default `false`; omitted on PUT = unchanged.
+- `widgetCards` — live appointment cards (Telegram widgets, Bot API 10.4) in client chats. While on, the messages
+  about an appointment go as its card instead of a text with inline buttons: the online booking message and the
+  prepayment request, the prepayment link the studio sends, reminders and reschedule notices. A card shows the
+  appointment as it is now — status line, when, what, master, prepayment («ожидается» / «внесено …» / «получена ✅»)
+  — with the buttons that fit: «💳 Оплатить N ₽» (opens the pending SBP link), «✅ Приду» (reminders, until
+  confirmed), «🔁 Перенести» (hands the chat to the AI; the card says «подберём другое время» until the appointment
+  changes), «📍 Маршрут» (Yandex Maps for the studio `address`, once confirmed). Every sent card is redrawn by the
+  server within ~30 s of any change to its appointment — confirmed or moved by staff, paid, cancelled, completed —
+  and stops changing once the visit is over or a day past. The message text is the card's caption, which apps without
+  widget support show instead. If Telegram refuses the widget (other than a blocked chat or a flood limit), the plain
+  message goes. Default `true`; omitted on PUT = unchanged.
 - `botUsername`, `staffChatBound`, `aiConfigured` are read-only (ignored on PUT).
 - `reminderOffsets` — when the bot reminds clients of an appointment: minutes before its start, e.g. `[1440, 120]` =
   «за 1 день» and «за 2 часа». 1–6 distinct integers, each 15…20160 (15 minutes … 14 days); the server returns them

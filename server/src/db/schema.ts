@@ -688,6 +688,38 @@ export const scheduledMessages = sqliteTable(
   ],
 );
 
+/**
+ * Appointment cards (Telegram widgets, bot/widget-cards.ts) sent to clients. While `active`, each is redrawn whenever
+ * what it shows changes (status, time, master, prepayment), whoever changed the appointment.
+ */
+export const widgetCards = sqliteTable(
+  'widget_cards',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    chatId: integer('chat_id').notNull(),
+    messageId: integer('message_id').notNull(),
+    appointmentId: integer('appointment_id')
+      .notNull()
+      .references(() => appointments.id, { onDelete: 'cascade' }),
+    /** `booking` (the booking / prepayment message) | `reminder` (a reminder or reschedule notice) */
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    /** The state last drawn: the message's `chat_data`. */
+    chatData: text('chat_data').notNull(),
+    /** `m` after «Перенести», until the appointment changes; null otherwise. */
+    pressed: text('pressed'),
+    pressedAt: ms('pressed_at'),
+    /** false once the card shows a final state, its visit is long past, or its message is gone. */
+    active: bool('active').notNull().default(true),
+    createdAt: ms('created_at').notNull(),
+    updatedAt: ms('updated_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('widget_cards_message_unique').on(t.chatId, t.messageId),
+    index('widget_cards_active_idx').on(t.active, t.appointmentId),
+  ],
+);
+
 export const bookingRequests = sqliteTable('booking_requests', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   chatId: integer('chat_id'),
