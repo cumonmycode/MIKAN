@@ -27,7 +27,13 @@ struct ChatsListView: View {
             }
         }
         .listStyle(.plain)
-        .searchable(text: $search, prompt: "Имя или @username")
+        // A collapsing large title or an auto-hiding search drawer above the pinned filter
+        // made the list shake while scrolling, so both stay put.
+        .searchable(
+            text: $search,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Имя или @username"
+        )
         .safeAreaBar(edge: .top) {
             if showsFilter {
                 Picker("Чаты", selection: $filter.animation()) {
@@ -54,6 +60,7 @@ struct ChatsListView: View {
         }
         .remoteErrorAlert(chats)
         .navigationTitle("Чаты")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     @ViewBuilder
