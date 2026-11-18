@@ -52,7 +52,7 @@ describe('settings, catalog, knowledge and uploads', () => {
     });
     expect(res.json()).toEqual({
       enabled: false, aiEnabled: false, greeting: 'Привет!', extraInstructions: 'Не обещай скидок', aftercareHour: 10,
-      remindersEnabled: false, reminderOffsets: [2880], reminderHoursBefore: 48, morningDigestAt: '09:30', eveningDigestAt: '21:30',
+      remindersEnabled: false, reminderOffsets: [2880], reminderHoursBefore: 48, widgetCards: false, morningDigestAt: '09:30', eveningDigestAt: '21:30',
       botUsername: 'mikan_test_bot', staffChatBound: false, aiConfigured: false,
     });
     expect(refresh).toHaveBeenCalledTimes(1);

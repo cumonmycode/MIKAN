@@ -28,7 +28,9 @@ import {
   type PhotoSource,
   type SendOptions,
   type SentMessage,
+  type WidgetMessage,
 } from './gateway.js';
+import { callWidgetApi, sentMessageId } from './widget-api.js';
 import { registerHandlers } from './handlers.js';
 import { toGrammyKeyboard } from './keyboards.js';
 import { BotPipeline } from './pipeline.js';
@@ -39,6 +41,10 @@ const WARN_THROTTLE_MS = 60_000;
 const API_TIMEOUT_SECONDS = 75; // > long-polling timeout (30 s)
 /** Uploaded pictures remembered by Telegram file_id, so carousel paging does not upload them again. */
 const MAX_CACHED_FILE_IDS = 500;
+/** `widget_query` (Bot API 10.4: presses in the appointment cards, bot/widget-card.ts) is not in grammY 1.46's types. */
+const ALLOWED_UPDATES = ['message', 'callback_query', 'widget_query'] as unknown as NonNullable<
+  NonNullable<Parameters<Bot['start']>[0]>['allowed_updates']
+>;
 
 function inlineButton(b: InlineButton): InlineKeyboardButton {
   if (b.url !== undefined) return { text: b.text, url: b.url };
@@ -248,7 +254,7 @@ export class BotController implements BotGateway {
         setCachedBotUsername(this.ctx.db, bot.botInfo.username);
         if (!current()) break;
         await bot.start({
-          allowed_updates: ['message', 'callback_query'],
+          allowed_updates: ALLOWED_UPDATES,
           onStart: (info) => {
             if (!current()) return;
             this.polling = true;
@@ -411,6 +417,34 @@ export class BotController implements BotGateway {
       await bot.api.deleteMessage(chatId, messageId);
     } catch (err) {
       throw toSendError(err);
+    }
+  }
+
+  async sendWidget(chatId: number, widget: WidgetMessage): Promise<SentMessage> {
+    const bot = this.requireBot();
+    try {
+      const sent = await withMarkup(truncate(widget.caption, TELEGRAM_MAX_CAPTION), (formatted) =>
+        callWidgetApi(bot.api, 'sendWidget', {
+          chat_id: chatId,
+          html: widget.html,
+          chat_data: widget.chatData,
+          caption: formatted.text,
+          ...(formatted.parse_mode ? { parse_mode: formatted.parse_mode } : {}),
+          allow_queries: true,
+        }),
+      );
+      return { messageId: sentMessageId(sent) };
+    } catch (err) {
+      throw toSendError(err);
+    }
+  }
+
+  async editWidgetData(chatId: number, messageId: number, chatData: string): Promise<void> {
+    const bot = this.requireBot();
+    try {
+      await callWidgetApi(bot.api, 'editMessageWidgetData', { chat_id: chatId, message_id: messageId, chat_data: chatData });
+    } catch (err) {
+      if (!notModified(err)) throw toSendError(err);
     }
   }
 

@@ -102,7 +102,7 @@ describe('bot: reminders at several moments, with buttons', () => {
 
     // Somebody else's chat cannot confirm it.
     const stranger = { chatId: CHAT + 5, telegramName: 'Чужой', username: null };
-    expect(await press(`rc:${appt.id}`, stranger)).toEqual({ text: 'Эта запись уже неактуальна' });
+    expect(await press(`rc:${appt.id}`, stranger)).toEqual({ text: 'Эта запись уже неактуальна', error: true });
     expect((await t.api('GET', `/api/appointments/${appt.id}`)).json().status).toBe('scheduled');
 
     expect(await press(`rc:${appt.id}`)).toEqual({ text: 'Запись подтверждена ✅' });
@@ -128,7 +128,7 @@ describe('bot: reminders at several moments, with buttons', () => {
 
     // A cancelled appointment's buttons are gone.
     await t.api('PATCH', `/api/appointments/${appt.id}`, { status: 'cancelled' });
-    expect(await press(`rc:${appt.id}`)).toEqual({ text: 'Эта запись уже неактуальна' });
+    expect(await press(`rc:${appt.id}`)).toEqual({ text: 'Эта запись уже неактуальна', error: true });
     expect(t.gateway.edits.at(-1)).toMatchObject({ kind: 'keyboard', keyboard: null });
   });
 });
