@@ -169,6 +169,13 @@
       "when": 1795032035257,
       "tag": "0024_studio_expenses",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1795038490590,
+      "tag": "0025_widget_cards",
+      "breakpoints": true
     }
   ]
 }

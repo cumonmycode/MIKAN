@@ -6,14 +6,14 @@ import { reminderAsSent } from '../domain/cancellation.js';
 import { followUpSkipReason } from '../domain/follow-ups.js';
 import { RESCHEDULE_NOTICE } from '../domain/reschedule-notice.js';
 import { ACTIVE_APPOINTMENT_STATUSES } from '../domain/scheduling.js';
-import { getBotSettings } from '../domain/settings.js';
 import { errorMessage } from '../lib/errors.js';
 import type { ScheduledRow } from '../lib/serialize.js';
 import { truncate } from '../lib/text.js';
 import { reminderKeyboard } from './callbacks.js';
 import { followUpKeyboard } from './follow-ups.js';
 import { BotSendError, type InlineKeyboard } from './gateway.js';
-import { cardTitle, REMINDER_CARD_HTML, reminderCardData } from './widget-card.js';
+import { cardTitle } from './widget-card.js';
+import { sendAppointmentCard } from './widget-cards.js';
 
 export const SENDER_INTERVAL_MS = 30_000;
 export const MAX_ATTEMPTS = 3;
@@ -60,19 +60,11 @@ function keyboardOf(msg: ScheduledRow): InlineKeyboard | undefined {
  * reason other than an unreachable chat or a flood limit (an old API, a rejected widget) — then the plain text goes.
  */
 async function sentAsCard(ctx: AppContext, chatId: number, msg: ScheduledRow): Promise<boolean> {
-  if (!aboutComingVisit(msg) || msg.appointmentId == null || !getBotSettings(ctx.db).widgetCards) return false;
+  if (!aboutComingVisit(msg) || msg.appointmentId == null) return false;
   const appointment = ctx.db.select().from(appointments).where(eq(appointments.id, msg.appointmentId)).get();
   if (!appointment) return false;
-  const state = appointment.status === 'confirmed' ? 'c' : 'p';
-  const chatData = reminderCardData(ctx.db, appointment, cardTitle(msg.text), state);
-  try {
-    await ctx.gateway.sendWidget(chatId, { html: REMINDER_CARD_HTML, chatData, caption: msg.text });
-    return true;
-  } catch (err) {
-    if (err instanceof BotSendError && (err.blocked || err.retryAfterMs !== null)) throw err;
-    ctx.log.warn({ scheduledId: msg.id, err: errorMessage(err) }, 'appointment card not sent, sending the plain reminder');
-    return false;
-  }
+  const sent = await sendAppointmentCard(ctx, { chatId, appointment, kind: 'reminder', title: cardTitle(msg.text), caption: msg.text });
+  return sent !== null;
 }
 
 /** Sends due pending aftercare/reminder/reschedule/follow-up messages. Does nothing while the bot is offline. */

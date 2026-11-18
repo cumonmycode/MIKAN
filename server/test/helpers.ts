@@ -23,6 +23,7 @@ import { loadConfig, type Config } from '../src/config.js';
 import { silentLogger, type AiClient, type AppContext, type ImageGenerator } from '../src/context.js';
 import { openDatabase } from '../src/db/client.js';
 import { seedDatabase } from '../src/db/seed.js';
+import { getBotSettings, saveBotSettings } from '../src/domain/settings.js';
 import type { CreatedQr, QrBankStatus, QrProvider } from '../src/payments/qr-provider.js';
 import type { ApnsTransport } from '../src/push/apns.js';
 
@@ -101,7 +102,11 @@ export class FakeGateway implements BotGateway {
     this.widgets.push({ chatId, widget, messageId });
     return { messageId };
   }
+  /** Errors to throw on the next editWidgetData calls (consumed in order). */
+  widgetEditFailures: Error[] = [];
   async editWidgetData(chatId: number, messageId: number, chatData: string): Promise<void> {
+    const failure = this.widgetEditFailures.shift();
+    if (failure) throw failure;
     this.widgetEdits.push({ chatId, messageId, chatData });
   }
   textsTo(chatId: number): string[] {
@@ -264,6 +269,8 @@ export async function createTestApp(
   const config = testConfig(opts.env);
   const { db, sqlite } = openDatabase(':memory:');
   seedDatabase(db, config);
+  // Client messages go as plain texts in tests; test/bot-widget-cards.test.ts turns the appointment cards on.
+  saveBotSettings(db, { ...getBotSettings(db), widgetCards: false });
   const gateway = opts.gateway ?? new FakeGateway();
   const ctx: AppContext = {
     db,

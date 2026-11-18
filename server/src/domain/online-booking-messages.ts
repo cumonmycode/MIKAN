@@ -1,5 +1,6 @@
 import type { InlineKeyboard, ReplyKeyboard } from '../bot/gateway.js';
 import { BUTTONS, PHONE_KEYBOARD } from '../bot/keyboards.js';
+import { defaultCardTitle, sendAppointmentCard } from '../bot/widget-cards.js';
 import { notifyStaff } from '../bot/staff.js';
 import type { AppContext } from '../context.js';
 import type { DbOrTx } from '../db/client.js';
@@ -89,6 +90,11 @@ export interface ClientMessage {
   keyboard?: InlineKeyboard;
   /** The keyboard under the input field (ignored with `keyboard`). */
   replyKeyboard?: ReplyKeyboard;
+  /**
+   * Sent as the live card of this appointment (bot/widget-cards.ts) while «widgetCards» is on, `text` as its caption;
+   * otherwise (or when Telegram refuses the widget) as `text` with `keyboard`.
+   */
+  card?: AppointmentRow;
 }
 
 export const clientBookedText = (f: BookingFacts): string =>
@@ -103,6 +109,7 @@ export function clientPaymentMessage(db: DbOrTx, a: AppointmentRow, f: BookingFa
       `Чтобы подтвердить запись, внесите предоплату **${formatRub(payment.amount)}** по кнопке ниже — она зачтётся в ` +
       `стоимость процедуры.\n\n${f.what}, мастер ${f.master}\nЕсли не успеть до ${until}, время освободится.`,
     keyboard: [[{ text: PAY_BUTTON, url: payment.payload }]],
+    card: a,
   };
 }
 
@@ -139,7 +146,10 @@ export const clientReleasedText = (ctx: AppContext, f: BookingFacts): string =>
 export async function deliverToChat(ctx: AppContext, chatId: number, message: ClientMessage): Promise<boolean> {
   if (!ctx.gateway.isRunning()) return false;
   try {
-    await ctx.gateway.sendText(chatId, message.text, { keyboard: message.keyboard, replyKeyboard: message.replyKeyboard });
+    const card = message.card
+      ? await sendAppointmentCard(ctx, { chatId, appointment: message.card, kind: 'booking', title: defaultCardTitle(ctx), caption: message.text })
+      : null;
+    if (!card) await ctx.gateway.sendText(chatId, message.text, { keyboard: message.keyboard, replyKeyboard: message.replyKeyboard });
     if (!findChat(ctx.db, chatId)) upsertChat(ctx.db, chatId);
     storeMessage(ctx.db, chatId, 'system', message.text);
     return true;
@@ -166,7 +176,7 @@ export async function safely(ctx: AppContext, what: string, send: () => Promise<
 
 /** The client's message right after booking: the payment request, else «Заявка принята…». */
 export function clientBookingMessage(db: DbOrTx, a: AppointmentRow, f: BookingFacts, payment: QrPaymentRow | null): ClientMessage {
-  return payment ? clientPaymentMessage(db, a, f, payment) : { text: clientBookedText(f) };
+  return payment ? clientPaymentMessage(db, a, f, payment) : { text: clientBookedText(f), card: a };
 }
 
 export const SHARE_NUMBER_TEXT = `Чтобы уведомления о записи приходили сюда, нажмите «${BUTTONS.contact}» внизу 👇 Это нужно сделать один раз.`;
